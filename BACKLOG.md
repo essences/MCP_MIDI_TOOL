@@ -11,7 +11,7 @@
 - [x] 接続スケルトン（機能なし）: MCPサーバーがクライアントから接続可能であることをテスト（tests/connection.test.ts）で保証
 - [ ] ストレージ層: data/ と manifest 管理実装
 - [x] ツール: store_midi（保存とfileId発行）
-- [ ] ツール: get_midi（取得、base64同梱オプション）
+ - [x] ツール: get_midi（取得、base64同梱オプション）
 - [ ] ツール: list_midi（ページング）
 - [ ] ツール: export_midi（data/exportへの出力）
 - [ ] ツール: list_devices（CoreMIDI列挙）
@@ -38,8 +38,8 @@
 - 大容量MIDIの処理時間
 
 ## 進捗メモ
-- 接続スケルトン完了に続き、store_midi の最小実装が緑化。manifest.json に追記され、data/midi に保存されることを確認済み。
-- 次は get_midi をTDDで着手：
-	1) 失敗するテスト（tools/call: get_midi → 指定fileIdの情報返却を期待）
-	2) 最小実装（manifest参照・サイズ/名前返却、includeBase64対応は後続）
-	3) リファクタ＆境界テスト（存在しないid、サイズ上限、base64オプション）
+- store_midi の最小実装に続き、get_midi を実装。手動スモークで initialize→store_midi→get_midi の往復が成功（メタ返却/サイズ/パスOK、includeBase64は任意）。
+- 次は list_midi をTDDで着手：
+	1) 失敗するテスト（tools/call: list_midi → items配列/ページングの基本形）
+	2) 最小実装（manifest参照で name/path/bytes/createdAt を返却、limit/offset）
+	3) リファクタ＆境界テスト（空リスト、ページ終端、負値防御）
