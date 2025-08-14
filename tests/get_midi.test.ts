@@ -19,8 +19,8 @@ async function readLine(child: any) {
   return JSON.parse(line);
 }
 
-describe("store_midi tool (TDD)", () => {
-  it("保存に成功し、fileId と保存パスが返る", async () => {
+describe("get_midi tool (TDD)", () => {
+  it("保存済みの fileId からメタ情報を取得できる", async () => {
     const child = spawnServer();
 
     // initialize
@@ -36,24 +36,37 @@ describe("store_midi tool (TDD)", () => {
     });
     await readLine(child); // ignore init result
 
-  // call tools/call for store_midi (base64: "fake")
+    // まず store_midi で1件保存
     sendLine(child, {
       jsonrpc: "2.0",
       id: 2,
       method: "tools/call",
       params: {
         name: "store_midi",
-        arguments: { base64: "ZmFrZQ==", name: "demo.mid" }
+        arguments: { base64: "AAEC", name: "get-test.mid" } // tiny bytes
       }
     });
-  const resp = await readLine(child);
+    const storeResp = await readLine(child);
+    expect(storeResp.error).toBeUndefined();
+    const fileId = storeResp.result.fileId as string;
 
-  expect(resp.error).toBeUndefined();
-  expect(resp.result).toBeDefined();
-  // 最低限の返却契約
-  expect(resp.result.ok).toBe(true);
-  expect(typeof resp.result.fileId).toBe("string");
-  expect(typeof resp.result.path).toBe("string");
+    // get_midi を呼び出し
+    sendLine(child, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "get_midi",
+        arguments: { fileId, includeBase64: false }
+      }
+    });
+    const getResp = await readLine(child);
+
+    expect(getResp.error).toBeUndefined();
+    expect(getResp.result).toBeDefined();
+    expect(typeof getResp.result.name).toBe("string");
+    expect(typeof getResp.result.path).toBe("string");
+    expect(typeof getResp.result.bytes).toBe("number");
 
     child.kill();
   }, 20000);

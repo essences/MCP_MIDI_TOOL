@@ -10,7 +10,7 @@
 - [x] 開発方針（TDD徹底）: 仕様→失敗するテスト→最小実装→リファクタ→コミットのサイクルを徹底し、必ずテストが緑になってから次へ進む
 - [x] 接続スケルトン（機能なし）: MCPサーバーがクライアントから接続可能であることをテスト（tests/connection.test.ts）で保証
 - [ ] ストレージ層: data/ と manifest 管理実装
-- [ ] ツール: store_midi（保存とfileId発行）
+- [x] ツール: store_midi（保存とfileId発行）
 - [ ] ツール: get_midi（取得、base64同梱オプション）
 - [ ] ツール: list_midi（ページング）
 - [ ] ツール: export_midi（data/exportへの出力）
@@ -38,7 +38,8 @@
 - 大容量MIDIの処理時間
 
 ## 進捗メモ
-- 接続スケルトンまで完了（テスト緑）。次は store_midi をTDDで実装開始：
-	1) 失敗するテスト（tools/call: store_midi → 未実装エラー）
-	2) 最小実装（Base64保存・fileId発行・manifest更新）
-	3) リファクタ＆境界テスト（10MB制限、拡張子、name省略時の命名）
+- 接続スケルトン完了に続き、store_midi の最小実装が緑化。manifest.json に追記され、data/midi に保存されることを確認済み。
+- 次は get_midi をTDDで着手：
+	1) 失敗するテスト（tools/call: get_midi → 指定fileIdの情報返却を期待）
+	2) 最小実装（manifest参照・サイズ/名前返却、includeBase64対応は後続）
+	3) リファクタ＆境界テスト（存在しないid、サイズ上限、base64オプション）
