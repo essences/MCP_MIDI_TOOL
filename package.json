@@ -1,0 +1,28 @@
+{
+  "name": "mcp-midi-tool",
+  "version": "0.1.0",
+  "description": "MCP server for MIDI read/write, playback, and transform (no AI inside).",
+  "type": "module",
+  "private": true,
+  "scripts": {
+  "dev": "tsx src/index.ts",
+  "build": "tsc -p tsconfig.json",
+  "start": "node dist/index.js",
+  "test": "vitest run --reporter=dot"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": ["mcp", "midi", "typescript"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}
