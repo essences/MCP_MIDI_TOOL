@@ -4,6 +4,18 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { appendItem, getItemById, readManifest } from "./storage.js";
+// CoreMIDI (node-midi) は動的 import（macOS以外やCIでの存在を許容）
+let MidiOutput: any = null;
+async function loadMidi() {
+  if (MidiOutput) return MidiOutput;
+  try {
+    const midi = await import('midi');
+    MidiOutput = midi.Output;
+  } catch {
+    MidiOutput = null;
+  }
+  return MidiOutput;
+}
 
 // 同一プロセス内の直近保存レコードのインメモリ索引（テストの並列実行耐性向上のため）
 type ItemRec = { id: string; name: string; path: string; bytes: number; createdAt: string };
@@ -154,7 +166,7 @@ async function main() {
     }
 
     // playback_midi: start MIDI playback (stubbed)
-    if (name === "playback_midi") {
+  if (name === "playback_midi") {
       const fileId: string | undefined = args?.fileId;
       const portName: string | undefined = args?.portName;
       if (!fileId) throw new Error("'fileId' is required for playback_midi");
@@ -171,9 +183,32 @@ async function main() {
       }
       if (!item) throw new Error(`fileId not found: ${fileId}`);
 
-      // macOS 以外はダミー成功（実再生は未対応）
-      const playbackId = randomUUID();
-      // 簡易的にメモリに開始状態を記録
+      // macOSで node-midi が利用可能な場合のみ、即時に開閉する簡易送出でPoC
+      let playbackId = randomUUID();
+      if (process.platform === 'darwin') {
+        const Out = await loadMidi();
+        if (Out) {
+          const out = new Out();
+          const ports = out.getPortCount();
+          let target = 0;
+          if (typeof portName === 'string' && portName.length > 0) {
+            for (let i = 0; i < ports; i++) {
+              const name = out.getPortName(i);
+              if (name.includes(portName)) { target = i; break; }
+            }
+          }
+          try {
+            out.openPort(target);
+            // 簡易確認: Middle C を短く鳴らす（Note On/Off）
+            out.sendMessage([0x90, 60, 100]);
+            out.sendMessage([0x80, 60, 0]);
+          } finally {
+            try { out.closePort(); } catch {}
+          }
+        }
+      }
+
+      // メモリ状態に記録
       (globalThis as any).__playbacks = (globalThis as any).__playbacks || new Map();
       (globalThis as any).__playbacks.set(playbackId, { fileId, portName: portName || null, startedAt: Date.now() });
 

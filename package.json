@@ -5,19 +5,24 @@
   "type": "module",
   "private": true,
   "scripts": {
-  "dev": "tsx src/index.ts",
-  "build": "tsc -p tsconfig.json",
-  "start": "node dist/index.js",
-  "test": "vitest run --reporter=dot"
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "vitest run --reporter=dot"
   },
   "engines": {
     "node": ">=20"
   },
-  "keywords": ["mcp", "midi", "typescript"],
+  "keywords": [
+    "mcp",
+    "midi",
+    "typescript"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "midi": "^2.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
