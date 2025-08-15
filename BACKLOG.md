@@ -1,8 +1,6 @@
-# プロダクトバックログ -- [x] ツール: list_midi（ページング）
-- [x] ツール: export_midi（data/exportへの出力）
-- [x] ツール: list_devices（CoreMIDI列挙）P MIDI TOOL
+# プロダクトバックログ - MCP MIDI TOOL
 
-更新日: 2025-08-14
+更新日: 2025-08-16
 
 凡例: [ ] 未着手 / [~] 進行中 / [x] 完了 / [!] ブロック
 
@@ -14,9 +12,9 @@
 - [ ] ストレージ層: data/ と manifest 管理実装
 - [x] ツール: store_midi（保存とfileId発行）
  - [x] ツール: get_midi（取得、base64同梱オプション）
-- [ ] ツール: list_midi（ページング）
-- [ ] ツール: export_midi（data/exportへの出力）
-- [ ] ツール: list_devices（CoreMIDI列挙）
+- [x] ツール: list_midi（ページング）
+- [x] ツール: export_midi（data/exportへの出力）
+- [x] ツール: list_devices（CoreMIDI列挙）
 - [ ] ツール: playback_midi（再生、portName任意）
 - [ ] ツール: stop_playback（停止）
 - [ ] ツール: transform_midi（transpose/quantize）
@@ -40,8 +38,6 @@
 - 大容量MIDIの処理時間
 
 ## 進捗メモ
-- store_midi の最小実装に続き、get_midi を実装。手動スモークで initialize→store_midi→get_midi の往復が成功（メタ返却/サイズ/パスOK、includeBase64は任意）。
-- 次は list_midi をTDDで着手：
-	1) 失敗するテスト（tools/call: list_midi → items配列/ページングの基本形）
-	2) 最小実装（manifest参照で name/path/bytes/createdAt を返却、limit/offset）
-	3) リファクタ＆境界テスト（空リスト、ページ終端、負値防御）
+- store_midi/get_midi/list_midi/export_midi/list_devices を実装。手動スモークとテストで確認済み（7件中6件GREEN）。
+- get_midi の一部ケースで fileId not found が発生。テスト調整または manifest 同期の改善を次イテレーションで行う。
+- 次は playback_midi/stop_playback の失敗テストから着手し、CoreMIDI 連携の礎を作る。
