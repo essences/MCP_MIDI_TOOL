@@ -176,6 +176,42 @@ async function main() {
       return { ok: true, devices } as any;
     }
 
+    // playback_midi: start MIDI playback (stubbed)
+    if (name === "playback_midi") {
+      const fileId: string | undefined = args?.fileId;
+      const portName: string | undefined = args?.portName;
+      if (!fileId) throw new Error("'fileId' is required for playback_midi");
+
+      // ファイル存在チェック
+      const manifestPath = getManifestPath();
+      let item: ItemRec | undefined = inMemoryIndex.get(fileId);
+      if (!item) {
+        try {
+          const raw = await fs.readFile(manifestPath, "utf8");
+          const manifest = JSON.parse(raw) as { items: ItemRec[] };
+          item = manifest.items.find((x) => x.id === fileId);
+        } catch {}
+      }
+      if (!item) throw new Error(`fileId not found: ${fileId}`);
+
+      // macOS 以外はダミー成功（実再生は未対応）
+      const playbackId = randomUUID();
+      // 簡易的にメモリに開始状態を記録
+      (globalThis as any).__playbacks = (globalThis as any).__playbacks || new Map();
+      (globalThis as any).__playbacks.set(playbackId, { fileId, portName: portName || null, startedAt: Date.now() });
+
+      return { ok: true, playbackId } as any;
+    }
+
+    // stop_playback: stop a running playback (stubbed)
+    if (name === "stop_playback") {
+      const playbackId: string | undefined = args?.playbackId;
+      if (!playbackId) throw new Error("'playbackId' is required for stop_playback");
+      const map: Map<string, any> | undefined = (globalThis as any).__playbacks;
+      if (map && map.has(playbackId)) map.delete(playbackId);
+      return { ok: true } as any;
+    }
+
     throw new Error(`Tool ${name} not found`);
   };
 
