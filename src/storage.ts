@@ -24,7 +24,8 @@ export function resolveExportDir(baseDir = process.cwd()) {
 }
 
 export function resolveManifestPath(baseDir = process.cwd()) {
-  return path.resolve(resolveDataDir(baseDir), "manifest.json");
+  const file = process.env.MCP_MIDI_MANIFEST || `manifest.${process.pid}.json`;
+  return path.resolve(resolveDataDir(baseDir), file);
 }
 
 export async function ensureDir(dir: string) {

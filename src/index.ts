@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { appendItem, getItemById, readManifest } from "./storage.js";
 
 // 同一プロセス内の直近保存レコードのインメモリ索引（テストの並列実行耐性向上のため）
 type ItemRec = { id: string; name: string; path: string; bytes: number; createdAt: string };
@@ -61,19 +62,8 @@ async function main() {
       const bytes = data.byteLength;
 
       // Update manifest
-  const manifestPath = getManifestPath();
-      let manifest: any = { items: [] };
-      try {
-        const raw = await fs.readFile(manifestPath, "utf8");
-        manifest = JSON.parse(raw);
-        if (!manifest || typeof manifest !== "object" || !Array.isArray(manifest.items)) {
-          manifest = { items: [] };
-        }
-      } catch {}
-
   const record = { id: fileId, name: nameWithExt, path: relPath, bytes, createdAt };
-  manifest.items.push(record);
-      await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+  await appendItem(record);
 
   // インメモリにも格納
   inMemoryIndex.set(fileId, record);
@@ -88,13 +78,8 @@ async function main() {
       
       if (!fileId) throw new Error("'fileId' is required for get_midi");
 
-  const manifestPath = getManifestPath();
-      let item: ItemRec | undefined = inMemoryIndex.get(fileId);
-      if (!item) {
-        const raw = await fs.readFile(manifestPath, "utf8");
-        const manifest = JSON.parse(raw) as { items: ItemRec[] };
-        item = manifest.items.find((x) => x.id === fileId);
-      }
+  let item: ItemRec | undefined = inMemoryIndex.get(fileId);
+  if (!item) item = (await getItemById(fileId)) as ItemRec | undefined;
       
       if (!item) throw new Error(`fileId not found: ${fileId}`);
 
@@ -124,13 +109,8 @@ async function main() {
         ? Number(offsetRaw) 
         : 0;
 
-  const manifestPath = getManifestPath();
-      let items: Array<{ id: string; name: string; path: string; bytes: number; createdAt: string }> = [];
-      try {
-        const raw = await fs.readFile(manifestPath, "utf8");
-        const manifest = JSON.parse(raw);
-        if (manifest && Array.isArray(manifest.items)) items = manifest.items;
-      } catch {}
+  let items: Array<{ id: string; name: string; path: string; bytes: number; createdAt: string }> = [];
+  try { items = (await readManifest()).items; } catch { items = []; }
 
       const total = items.length;
       const slice = items.slice(offset, offset + limit);
@@ -143,10 +123,7 @@ async function main() {
       
       if (!fileId) throw new Error("'fileId' is required for export_midi");
 
-  const manifestPath = getManifestPath();
-      const raw = await fs.readFile(manifestPath, "utf8");
-      const manifest = JSON.parse(raw) as { items: Array<{ id: string; name: string; path: string }> };
-      const item = manifest.items.find((x) => x.id === fileId);
+  const item = await getItemById(fileId);
       
       if (!item) throw new Error(`fileId not found: ${fileId}`);
 
