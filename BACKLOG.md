@@ -1,4 +1,6 @@
-# プロダクトバックログ - MCP MIDI TOOL
+# プロダクトバックログ -- [x] ツール: list_midi（ページング）
+- [x] ツール: export_midi（data/exportへの出力）
+- [x] ツール: list_devices（CoreMIDI列挙）P MIDI TOOL
 
 更新日: 2025-08-14
 
