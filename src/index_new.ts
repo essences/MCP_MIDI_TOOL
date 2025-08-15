@@ -4,16 +4,6 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-// 同一プロセス内の直近保存レコードのインメモリ索引（テストの並列実行耐性向上のため）
-type ItemRec = { id: string; name: string; path: string; bytes: number; createdAt: string };
-const inMemoryIndex = new Map<string, ItemRec>();
-
-// プロセス分離されたマニフェスト（並列テストによる破損回避）
-function getManifestPath() {
-  const file = process.env.MCP_MIDI_MANIFEST || `manifest.${process.pid}.json`;
-  return path.resolve(process.cwd(), "data", file);
-}
-
 // Minimal MCP server with tools: store_midi, get_midi, list_midi, export_midi, list_devices
 async function main() {
   const transport = new StdioServerTransport();
@@ -61,7 +51,7 @@ async function main() {
       const bytes = data.byteLength;
 
       // Update manifest
-  const manifestPath = getManifestPath();
+      const manifestPath = path.resolve(process.cwd(), "data", "manifest.json");
       let manifest: any = { items: [] };
       try {
         const raw = await fs.readFile(manifestPath, "utf8");
@@ -71,12 +61,8 @@ async function main() {
         }
       } catch {}
 
-  const record = { id: fileId, name: nameWithExt, path: relPath, bytes, createdAt };
-  manifest.items.push(record);
+      manifest.items.push({ id: fileId, name: nameWithExt, path: relPath, bytes, createdAt });
       await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
-
-  // インメモリにも格納
-  inMemoryIndex.set(fileId, record);
 
       return { ok: true, fileId, path: relPath, bytes, createdAt } as any;
     }
@@ -88,17 +74,14 @@ async function main() {
       
       if (!fileId) throw new Error("'fileId' is required for get_midi");
 
-  const manifestPath = getManifestPath();
-      let item: ItemRec | undefined = inMemoryIndex.get(fileId);
-      if (!item) {
-        const raw = await fs.readFile(manifestPath, "utf8");
-        const manifest = JSON.parse(raw) as { items: ItemRec[] };
-        item = manifest.items.find((x) => x.id === fileId);
-      }
+      const manifestPath = path.resolve(process.cwd(), "data", "manifest.json");
+      const raw = await fs.readFile(manifestPath, "utf8");
+      const manifest = JSON.parse(raw) as { items: Array<{ id: string; name: string; path: string; bytes: number; createdAt: string }> };
+      const item = manifest.items.find((x) => x.id === fileId);
       
       if (!item) throw new Error(`fileId not found: ${fileId}`);
 
-      const absPath = path.resolve(process.cwd(), item!.path);
+      const absPath = path.resolve(process.cwd(), item.path);
       const buf = includeBase64 ? await fs.readFile(absPath) : undefined;
       const base64 = includeBase64 && buf ? buf.toString("base64") : undefined;
 
@@ -124,7 +107,7 @@ async function main() {
         ? Number(offsetRaw) 
         : 0;
 
-  const manifestPath = getManifestPath();
+      const manifestPath = path.resolve(process.cwd(), "data", "manifest.json");
       let items: Array<{ id: string; name: string; path: string; bytes: number; createdAt: string }> = [];
       try {
         const raw = await fs.readFile(manifestPath, "utf8");
@@ -143,7 +126,7 @@ async function main() {
       
       if (!fileId) throw new Error("'fileId' is required for export_midi");
 
-  const manifestPath = getManifestPath();
+      const manifestPath = path.resolve(process.cwd(), "data", "manifest.json");
       const raw = await fs.readFile(manifestPath, "utf8");
       const manifest = JSON.parse(raw) as { items: Array<{ id: string; name: string; path: string }> };
       const item = manifest.items.find((x) => x.id === fileId);
