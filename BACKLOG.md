@@ -1,8 +1,20 @@
 # プロダクトバックログ - MCP MIDI TOOL
 
-更新日: 2025-08-17
+更新日: 2025-08-17（優先順位を再評価）
 
 凡例: [ ] 未着手 / [~] 進行中 / [x] 完了 / [!] ブロック
+
+## 最優先（Next Up / Top 10）
+1. [ ] R7: JSONスキーマ起草（`docs/specs/json_midi_schema_v1.md`・Zod型・順序ルール）
+2. [ ] R7: ツール `json_to_smf { json, name? }`（検証→コンパイル→保存）
+3. [ ] R7: ツール `smf_to_json { fileId }`（解析→JSON化）
+4. [~] R6: TDD強化（固定テンポ/テンポ変化/停止/順序・totalDurationMs検証）
+5. [ ] R3: 観測性（構造化ログ/共通エラーモデル/操作IDトレース）
+6. [ ] R2: メタ情報抽出の拡充（durationMs/ppq/トラック数/イベント数）
+7. [ ] R2: エクスポートの名前衝突回避と履歴（連番/ハッシュ）
+8. [ ] R4: CIで各OSのビルドとdryRunスモーク（macOS/Windows/Linux）
+9. [ ] R4: Windows/Linux のデバイス列挙・出力の実機検証
+10. [ ] R2: transform_midi（最小: transpose → 次: quantize/tempo/humanize）
 
 ## R1（MVP）
 - [x] MCPツール仕様を確定しドキュメント化（docs/specs/R1_requirements.md）
@@ -23,9 +35,9 @@
 - [x] 最小テスト（ユニット/結合）
 
 ## R2（拡張）
-- [ ] transform_midi: tempo変更/humanizeの追加
+- [ ] メタ情報抽出の拡充（durationMs/ppq/トラック数/イベント数）
 - [ ] エクスポート: 名前衝突回避と履歴
-- [ ] メタ情報抽出の拡充（durationMs/ppq など）
+- [ ] transform_midi: transpose → quantize → tempo変更/humanize の順で段階実装
 
 ## R3（運用）
 - [ ] 観測性（構造化ログ、操作IDトレース、簡易メトリクス）
@@ -33,8 +45,8 @@
 
 ## R4（互換性 / クロスプラットフォーム化）
 - [~] node-midi 採用で CoreMIDI/MME/ALSA を共通抽象化
-- [ ] Windows/Linux のデバイス列挙と出力を実機で検証
 - [ ] CIで各OSビルド・最小再生スモークを追加
+- [ ] Windows/Linux のデバイス列挙と出力を実機で検証
 
 ## R6（実装: SMFプレイバック）
 - [x] 依存導入: `midi`, `@tonejs/midi`
@@ -44,8 +56,10 @@
 - [x] 停止: `stop_playback` で全ノート消音/タイマ解除
 - [~] TDD: 固定テンポ/テンポ変化/停止/順序のテスト（継続強化）
 - [x] スモーク: きらきら星/8秒継続SMFで store_midi→play_smf を再生
+- [x] プロンプト: v5（ネットDL→Bach 3声インベンション→dryRun→再生→停止）
 
 ## R7（JSONファースト: 作曲/編集）
+- [x] ADR: JSONファースト採用（`docs/adr/ADR-0002-json-first-composition.md`）
 - [ ] 仕様: `docs/specs/json_midi_schema_v1.md`（Zod型・順序ルール）
 - [ ] ツール: `json_to_smf { json, name? }`（検証→コンパイル→保存）
 - [ ] ツール: `smf_to_json { fileId }`（解析→JSON化）
