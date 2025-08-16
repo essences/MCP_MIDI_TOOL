@@ -141,7 +141,7 @@ async function main() {
         throw new Error(`json validation failed: ${issues || parsed.error.message}`);
       }
 
-      const song = parsed.data;
+  const song = parsed.data;
       const bin = encodeToSmfBinary(song);
       const data = Buffer.from(bin.buffer, bin.byteOffset, bin.byteLength);
 
@@ -160,12 +160,14 @@ async function main() {
       const relPath = path.relative(base, absPath);
       const createdAt = new Date().toISOString();
       const bytes = data.byteLength;
+  const trackCount = Array.isArray(song.tracks) ? song.tracks.length : 0;
+  const eventCount = Array.isArray(song.tracks) ? song.tracks.reduce((a: number, t: any)=> a + (Array.isArray(t.events)? t.events.length : 0), 0) : 0;
 
       const record = { id: fileId, name: nameWithExt, path: relPath, bytes, createdAt };
       await appendItem(record);
       inMemoryIndex.set(fileId, record);
 
-      return wrap({ ok: true, fileId, path: relPath, bytes, createdAt }) as any;
+  return wrap({ ok: true, fileId, path: relPath, bytes, createdAt, trackCount, eventCount }) as any;
     }
 
     // smf_to_json: read SMF, parse with @tonejs/midi, convert to JSON schema
@@ -179,8 +181,11 @@ async function main() {
 
       const absPath = path.resolve(resolveBaseDir(), item.path);
       const buf = await fs.readFile(absPath);
-      const json = await decodeSmfToJson(buf);
-      return wrap({ ok: true, json }) as any;
+  const json = await decodeSmfToJson(buf);
+  const bytes = buf.byteLength;
+  const trackCount = Array.isArray(json.tracks) ? json.tracks.length : 0;
+  const eventCount = Array.isArray(json.tracks) ? json.tracks.reduce((a: number, t: any)=> a + (Array.isArray(t.events)? t.events.length : 0), 0) : 0;
+  return wrap({ ok: true, json, bytes, trackCount, eventCount }) as any;
     }
 
     // play_smf: parse SMF and schedule playback (or dryRun for analysis only)
