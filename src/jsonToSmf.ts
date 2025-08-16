@@ -80,6 +80,20 @@ export function encodeToSmfBinary(song: JsonMidiSong): Uint8Array {
         enc.push({ tick: e.tick, ord: 10, bytes: [0xc0 | (ch & 0x0f), prog] });
         continue;
       }
+      if (e.type === "cc") {
+        const ch = Number.isFinite(Number(e.channel)) ? (e.channel as number) : (chDefault ?? 0);
+        const ctrl = Math.max(0, Math.min(127, e.controller|0));
+        const val = Math.max(0, Math.min(127, e.value|0));
+        enc.push({ tick: e.tick, ord: 20, bytes: [0xb0 | (ch & 0x0f), ctrl, val] });
+        continue;
+      }
+      if (e.type === "pitchBend") {
+        const ch = Number.isFinite(Number(e.channel)) ? (e.channel as number) : (chDefault ?? 0);
+        const v14 = Math.max(-8192, Math.min(8191, e.value|0)) + 8192; // 0..16383
+        const lsb = v14 & 0x7f, msb = (v14 >> 7) & 0x7f;
+        enc.push({ tick: e.tick, ord: 30, bytes: [0xe0 | (ch & 0x0f), lsb, msb] });
+        continue;
+      }
       if (e.type === "note") {
         const ch = Number.isFinite(Number(e.channel)) ? (e.channel as number) : (chDefault ?? 0);
         const n = Math.max(0, Math.min(127, e.pitch|0));
@@ -96,19 +110,46 @@ export function encodeToSmfBinary(song: JsonMidiSong): Uint8Array {
         enc.push({ tick: e.tick, ord: 0, bytes: [0xff, 0x03, ...writeVarLen(nameBytes.length), ...nameBytes] });
         continue;
       }
+      if (e.type === "meta.marker") {
+        const txt = textToBytes(String(e.text).slice(0, 128));
+        enc.push({ tick: e.tick, ord: 5, bytes: [0xff, 0x06, ...writeVarLen(txt.length), ...txt] });
+        continue;
+      }
+      if (e.type === "meta.timeSignature") {
+        // handled later (first track)
+        continue;
+      }
+      if (e.type === "meta.keySignature") {
+        // handled later (first track)
+        continue;
+      }
       // unimplemented types are ignored for now (future work)
     }
     return enc;
   };
 
-  // Tempo events: gather all and place into track 0
+  // Gather global metas (tempo, timeSignature, keySignature) for track 0
   const tempoEnc: EncEvent[] = [];
+  const tsEnc: EncEvent[] = [];
+  const ksEnc: EncEvent[] = [];
   for (const tr of song.tracks) {
     for (const e of tr.events) {
       if (e.type === "meta.tempo") {
         const uspq = Math.max(1, e.usPerQuarter|0);
         const b2 = (uspq >>> 16) & 0xff, b1 = (uspq >>> 8) & 0xff, b0 = uspq & 0xff;
         tempoEnc.push({ tick: e.tick, ord: -10, bytes: [0xff, 0x51, 0x03, b2, b1, b0] });
+      } else if (e.type === "meta.timeSignature") {
+        const num = Math.max(1, e.numerator|0);
+        const den = Math.max(1, e.denominator|0);
+        // convert to power-of-two exponent
+        const dd = Math.max(0, Math.round(Math.log2(den)));
+        const cc = 24; // MIDI clocks per metronome click
+        const bb = 8;  // 32nd notes per 24 MIDI clocks
+        tsEnc.push({ tick: e.tick, ord: -9, bytes: [0xff, 0x58, 0x04, num & 0xff, dd & 0xff, cc, bb] });
+      } else if (e.type === "meta.keySignature") {
+        const sf = (e.sf|0) & 0xff; // signed stored in byte
+        const mi = (e.mi|0) & 0xff;
+        ksEnc.push({ tick: e.tick, ord: -8, bytes: [0xff, 0x59, 0x02, sf, mi] });
       }
     }
   }
@@ -121,11 +162,11 @@ export function encodeToSmfBinary(song: JsonMidiSong): Uint8Array {
     for (let i = 0; i < song.tracks.length; i++) merged.push(...makeEncEventsForTrack(i));
     trackChunks.push(buildTrackChunk(merged));
   } else {
-    // format 1: first track gets tempo + its own events
+    // format 1: first track gets global metas + its own events
     for (let i = 0; i < song.tracks.length; i++) {
       const own = makeEncEventsForTrack(i);
-      if (i === 0 && tempoEnc.length > 0) {
-        trackChunks.push(buildTrackChunk([...tempoEnc, ...own]));
+      if (i === 0 && (tempoEnc.length > 0 || tsEnc.length > 0 || ksEnc.length > 0)) {
+        trackChunks.push(buildTrackChunk([...tempoEnc, ...tsEnc, ...ksEnc, ...own]));
       } else {
         trackChunks.push(buildTrackChunk(own));
       }

@@ -27,7 +27,7 @@ export async function decodeSmfToJson(buf: Uint8Array | Buffer): Promise<JsonMid
       events.push({ type: "program", tick: 0, program: Math.max(0, Math.min(127, prog)), ...(channel !== undefined ? { channel } : {}) });
     }
 
-    // Notes
+  // Notes
     for (const nt of (tr.notes || [])) {
       const tick = Math.max(0, Math.round(Number(nt.ticks) || 0));
       const duration = Math.max(1, Math.round(Number(nt.durationTicks) || 0));
@@ -36,6 +36,39 @@ export async function decodeSmfToJson(buf: Uint8Array | Buffer): Promise<JsonMid
       const ev: any = { type: "note", tick, pitch, velocity, duration };
       if (channel !== undefined) ev.channel = channel;
       events.push(ev);
+    }
+
+    // Control Changes: controlChanges is a dict of controller -> event[]
+    const ccDict = (tr as any).controlChanges || {};
+    for (const [numStr, arr] of Object.entries(ccDict)) {
+      const controller = Math.max(0, Math.min(127, Number(numStr) || 0));
+      for (const cc of (arr as any[])) {
+        const tick = Math.max(0, Math.round(Number((cc as any).ticks) || 0));
+        let v = Number((cc as any).value);
+        if (!Number.isFinite(v)) v = 0;
+        // Tone's CC value may be 0..1; scale to 0..127 if so
+        if (v >= 0 && v <= 1) v = Math.round(v * 127);
+        const value = Math.max(0, Math.min(127, Math.round(v)));
+        const ev: any = { type: "cc", tick, controller, value };
+        if (channel !== undefined) ev.channel = channel;
+        events.push(ev);
+      }
+    }
+
+    // Pitch Bend (if available)
+    for (const pb of (tr.pitchBends || [])) {
+      const tick = Math.max(0, Math.round(Number(pb.ticks) || 0));
+      const value14 = Math.max(0, Math.min(16383, Math.round(Number(pb.value) || 8192)));
+      const value = value14 - 8192;
+      const ev: any = { type: "pitchBend", tick, value };
+      if (channel !== undefined) ev.channel = channel;
+      events.push(ev);
+    }
+
+    // Marker and others if available
+    for (const mk of (tr.markers || [])) {
+      const tick = Math.max(0, Math.round(Number(mk.ticks) || 0));
+      events.push({ type: "meta.marker", tick, text: String(mk.text || "").slice(0,128) });
     }
 
     // Track name as meta
