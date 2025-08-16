@@ -18,15 +18,15 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
 2) json_to_smf: JSONをSMFへコンパイルして保存（fileId取得）
 3) play_smf: `dryRun:true`で解析（scheduledEvents/totalDurationMsを確認）→ 実再生
 
-最小JSON例（概略）:
+最小JSON例（概略・スキーマ準拠）:
 ```json
 {
    "ppq": 480,
    "tracks": [
-      { "events": [ { "type": "meta.tempo", "bpm": 120, "tick": 0 } ] },
+         { "events": [ { "type": "meta.tempo", "usPerQuarter": 500000, "tick": 0 } ] },
       { "channel": 0, "events": [
          { "type": "program", "program": 0, "tick": 0 },
-         { "type": "note", "note": 60, "velocity": 100, "tick": 0, "durationTicks": 960 }
+            { "type": "note", "pitch": 60, "velocity": 100, "tick": 0, "duration": 960 }
       ]}
    ]
 }
@@ -71,6 +71,38 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
    - 出力: `dryRun:true` の場合 `{ scheduledEvents, totalDurationMs }` を返却。実再生時は `playbackId` を発行。
 - get_playback_status
    - 出力: `{ playbackId, done, cursorMs, lastSentAt, totalDurationMs }`
+
+### JSONイベント仕様（抜粋）
+- note: `{ type:"note", tick, pitch(0-127), velocity(1-127), duration>=1, channel? }`
+- cc: `{ type:"cc", tick, controller(0-127), value(0-127), channel? }`
+- program: `{ type:"program", tick, program(0-127), channel? }`
+- pitchBend: `{ type:"pitchBend", tick, value(-8192..8191), channel? }`
+- meta.tempo: `{ type:"meta.tempo", tick, usPerQuarter>=1 }`（BPM=60,000,000/usPerQuarter）
+- meta.timeSignature: `{ type:"meta.timeSignature", tick, numerator>=1, denominator∈{1,2,4,8,16,32} }`
+- meta.keySignature: `{ type:"meta.keySignature", tick, sf(-7..7), mi∈{0,1} }`
+- meta.marker: `{ type:"meta.marker", tick, text<=128 }`
+- meta.trackName: `{ type:"meta.trackName", tick, text<=128 }`
+
+### MCPクライアントからの呼び出し例（擬似）
+以下はMCPクライアントが送るpayloadの概略です（実際はクライアント実装に依存）。
+
+json_to_smf:
+```jsonc
+{
+   "tool": "json_to_smf",
+   "arguments": {
+      "song": { "ppq":480, "tracks":[ {"events":[{"type":"meta.tempo","tick":0,"usPerQuarter":500000}]}, {"channel":0,"events":[{"type":"program","tick":0,"program":0},{"type":"note","tick":0,"pitch":60,"velocity":100,"duration":960}]} ] },
+      "name": "example.json",
+      "overwrite": true
+   }
+}
+```
+
+play_smf（dryRun→実再生）:
+```jsonc
+{ "tool":"play_smf", "arguments": { "fileId":"<from-json_to_smf>", "dryRun": true } }
+{ "tool":"play_smf", "arguments": { "fileId":"<from-json_to_smf>", "portName":"IAC", "schedulerLookaheadMs":200, "schedulerTickMs":20 } }
+```
 
 ## ディレクトリ
 - `src/` MCPサーバ本体（stdio）
