@@ -15,34 +15,42 @@
   - json_to_smf, smf_to_json, play_smf, stop_playback, list_devices, get_playback_status
   - （任意）Web検索MCPツール（例: web.search / brave.search など）。あれば使用、無ければスキップ。
 
-[パートA: JSON→SMF→dryRun→実再生→停止→逆変換]
-A-1) JSON楽曲（最小構成）を生成:
+[パートA: JSON→SMF→dryRun→実再生→停止→逆変換（メロディー検証）]
+A-1) JSON楽曲（具体的メロディー）を生成:
 {
   "ppq": 480,
   "tracks": [
-    { "events": [ { "type": "meta.tempo", "tick": 0, "usPerQuarter": 500000 } ] },
+    { "events": [ { "type": "meta.tempo", "tick": 0, "usPerQuarter": 500000 }, { "type": "meta.trackName", "tick": 0, "text": "Melody" } ] },
     { "channel": 0, "events": [
       { "type": "program", "tick": 0, "program": 0 },
-      { "type": "note", "tick": 0, "pitch": 60, "velocity": 100, "duration": 240 }
+      { "type": "note", "tick": 0,    "pitch": 60, "velocity": 100, "duration": 240 },
+      { "type": "note", "tick": 240,  "pitch": 62, "velocity": 100, "duration": 240 },
+      { "type": "note", "tick": 480,  "pitch": 64, "velocity": 100, "duration": 240 },
+      { "type": "note", "tick": 720,  "pitch": 65, "velocity": 100, "duration": 240 },
+      { "type": "note", "tick": 960,  "pitch": 67, "velocity": 100, "duration": 240 },
+      { "type": "note", "tick": 1200, "pitch": 65, "velocity": 100, "duration": 240 },
+      { "type": "note", "tick": 1440, "pitch": 64, "velocity": 100, "duration": 240 },
+      { "type": "note", "tick": 1680, "pitch": 62, "velocity": 100, "duration": 240 },
+      { "type": "note", "tick": 1920, "pitch": 60, "velocity": 100, "duration": 240 }
     ]}
   ]
 }
 
-A-2) json_to_smf を呼び出し、name="claude_smoke.mid", overwrite=true で保存。
+A-2) json_to_smf を呼び出し、name="claude_melody.mid", overwrite=true で保存。
   - 期待: fileId, bytes, trackCount, eventCount を取得。
 
 A-3) play_smf を dryRun:true で実行。
-  - 期待: scheduledEvents >= 1, totalDurationMs > 0。
+  - 期待: scheduledEvents が複数件（ノート数に応じて増加）、totalDurationMs が数秒程度。
 
 A-4) list_devices を実行し、利用可能な出力ポート名を列挙。利用可能な場合のみ下記A-5へ。
 
 A-5) play_smf を実再生で実行（portNameに上記のポート名を指定）。
   - オプション: schedulerLookaheadMs=200, schedulerTickMs=20。
   - 期待: playbackId を取得。get_playback_status で cursorMs/totalDurationMs/done を観測。
-  - 2秒程度で stop_playback を実行して停止。
+  - 2〜3秒程度で stop_playback を実行して停止。
 
 A-6) smf_to_json を呼び出し、A-2の fileId を逆変換。
-  - 期待: json.ppq==480、先頭トラックに meta.tempo があること。
+  - 期待: json.ppq==480、先頭トラックに meta.tempo / meta.trackName("Melody") があること。
 
 [パートB: （任意）Web検索→MIDI取得→保存→dryRun]
 B-1) （Web検索MCPがある場合のみ）
