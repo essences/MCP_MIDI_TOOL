@@ -15,6 +15,13 @@ export async function decodeSmfToJson(buf: Uint8Array | Buffer): Promise<JsonMid
     tick: Number(t.ticks) || 0,
     usPerQuarter: Math.max(1, Math.round(60000000 / (Number(t.bpm) || 120)))
   }));
+  const tsEvents = (midi.header?.timeSignatures || []).map((ts: any) => {
+    const tick = Number(ts.ticks) || 0;
+    const arr = (ts.timeSignature || []) as number[];
+    const numerator = Number(arr?.[0]) || 4;
+    const denominator = Number(arr?.[1]) || 4;
+    return { type: "meta.timeSignature" as const, tick, numerator, denominator };
+  });
 
   const tracks = midi.tracks.map((tr: any) => {
     const name: string | undefined = tr.name || undefined;
@@ -81,12 +88,12 @@ export async function decodeSmfToJson(buf: Uint8Array | Buffer): Promise<JsonMid
     return { name, channel, events };
   });
 
-  // Prepend tempo events into first track if exists; else create one
-  if (tempoEvents.length > 0) {
+  // Prepend tempo/timeSignature events into first track if exists; else create one
+  if (tempoEvents.length > 0 || tsEvents.length > 0) {
     if (tracks.length === 0) {
-      tracks.push({ name: undefined, channel: undefined, events: [...tempoEvents] });
+      tracks.push({ name: undefined, channel: undefined, events: [...tempoEvents, ...tsEvents] });
     } else {
-      tracks[0]!.events.unshift(...tempoEvents);
+      tracks[0]!.events.unshift(...tempoEvents, ...tsEvents);
       tracks[0]!.events.sort((a: any, b: any) => a.tick - b.tick);
     }
   }

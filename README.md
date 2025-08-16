@@ -7,11 +7,30 @@
 - SMF解析: [@tonejs/midi](https://www.npmjs.com/package/@tonejs/midi)
 
 ## JSONファースト（作曲/編集フロー）
-AIとの連携では、長大なBase64よりも「構造化JSON→SMFコンパイル」の方が堅牢で反復編集に適します（ADR-0002）。今後、以下のツールを追加予定です。
-- json_to_smf: JSONを検証してSMFへコンパイルし保存
-- smf_to_json: 既存SMFをJSONへデコンパイル
+AIとの連携では、長大なBase64よりも「構造化JSON→SMFコンパイル」の方が堅牢で反復編集に適します（ADR-0002）。本サーバはJSONファーストを正式サポートしています。
+- json_to_smf: JSONを検証しSMFへコンパイル・保存（bytes/trackCount/eventCount を返却）
+- smf_to_json: 既存SMFをJSONへデコンパイル（同メトリクス付き）
 
-JSONスキーマ（最小案）や順序ルール、検証方針は `docs/adr/ADR-0002-json-first-composition.md` を参照してください。既存のSMFワークフロー（store_midi→play_smf）はそのまま利用できます。
+JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-composition.md` と `docs/specs/json_midi_schema_v1.md` を参照。既存のSMFワークフロー（store_midi→play_smf）もそのまま利用可能です。
+
+### クイックフロー（JSON→SMF→再生）
+1) smf_to_json（任意）: 参考用に既存SMFをJSON化
+2) json_to_smf: JSONをSMFへコンパイルして保存（fileId取得）
+3) play_smf: `dryRun:true`で解析（scheduledEvents/totalDurationMsを確認）→ 実再生
+
+最小JSON例（概略）:
+```json
+{
+   "ppq": 480,
+   "tracks": [
+      { "events": [ { "type": "meta.tempo", "bpm": 120, "tick": 0 } ] },
+      { "channel": 0, "events": [
+         { "type": "program", "program": 0, "tick": 0 },
+         { "type": "note", "note": 60, "velocity": 100, "tick": 0, "durationTicks": 960 }
+      ]}
+   ]
+}
+```
 
 ## 主な機能（MCP Tools）
 - store_midi: base64のMIDIを保存し、fileIdを返す
@@ -26,6 +45,19 @@ JSONスキーマ（最小案）や順序ルール、検証方針は `docs/adr/AD
 - get_playback_status: 再生進捗の取得（cursor/lastSentAt/総尺など）
 
 戻り値はClaude互換の`content: [{type:'text', text: ...}]`を含みます。
+
+### ツール詳細（入出力の要点）
+- json_to_smf
+   - 入力: `{ song: <JSON MIDI>, name?: string, overwrite?: boolean }`
+   - 出力: `{ fileId, bytes, trackCount, eventCount }`
+- smf_to_json
+   - 入力: `{ fileId }`
+   - 出力: `{ json: <JSON MIDI>, bytes, trackCount, eventCount }`
+- play_smf（dryRun推奨→実再生）
+   - 入力: `{ fileId, dryRun?: true|false, portName?: string, startMs?: number, stopMs?: number, schedulerLookaheadMs?: number, schedulerTickMs?: number }`
+   - 出力: `dryRun:true` の場合 `{ scheduledEvents, totalDurationMs }` を返却。実再生時は `playbackId` を発行。
+- get_playback_status
+   - 出力: `{ playbackId, done, cursorMs, lastSentAt, totalDurationMs }`
 
 ## ディレクトリ
 - `src/` MCPサーバ本体（stdio）
@@ -43,6 +75,9 @@ JSONスキーマ（最小案）や順序ルール、検証方針は `docs/adr/AD
 
 補足:
 - 環境変数`MCP_MIDI_MANIFEST`でマニフェストパスを上書き可能です（デフォルトはプロセスごとに`manifest.<pid>.json`）。
+
+テスト:
+- `npm test`（Vitest）でユニット/結合テスト一式が実行されます。
 
 ## Claudeでの検証手順（推奨）
 - 単音スモーク＆基本操作: `docs/prompts/claude_test_prompts_v2.md`
@@ -65,6 +100,11 @@ JSONスキーマ（最小案）や順序ルール、検証方針は `docs/adr/AD
 
 例: `{ fileId, portName:"IAC", schedulerLookaheadMs:200, schedulerTickMs:20 }`
 
+観測ポイント（dryRun/実再生）:
+- totalDurationMs: SMF全体の総尺
+- scheduledEvents: dryRunで解析されたイベント件数
+- cursorMs/lastSentAt/done: 再生中の進捗確認用
+
 ## 受信側（音が出ない時）
 - macOSの例: `docs/setup/macos_coremidi_receiver.md`
 - チェックリスト: `docs/checklists/receiver_setup_checklist.md`
@@ -80,6 +120,13 @@ JSONスキーマ（最小案）や順序ルール、検証方針は `docs/adr/AD
 - TDDで進行。Vitestなどでユニット/結合テスト（`npm test`）
 - コード: `src/index.ts`, `src/storage.ts`
 - 仕様/バックログ: `docs/specs/*`, `BACKLOG.md`
+
+### 変換メトリクス（観測可能性）
+- json_to_smf / smf_to_json は以下を返します:
+   - `bytes`: 入出力SMFのバイトサイズ
+   - `trackCount`: トラック数
+   - `eventCount`: イベント総数（解析/生成時点）
+これらはクライアント側のログやガードレール（過大サイズ回避）に活用できます。
 
 ## 既知の制限/注意
 - 大容量SMFはdryRunで件数や総尺を把握し、範囲再生（startMs/stopMs）を推奨
