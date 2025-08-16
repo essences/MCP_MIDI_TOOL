@@ -12,7 +12,7 @@ export type MidiItem = {
 
 export type Manifest = { items: MidiItem[] };
 
-function resolveBaseDir(): string {
+export function resolveBaseDir(): string {
   // 優先: 環境変数で明示されたベースディレクトリ
   const envBase = process.env.MCP_MIDI_BASE_DIR;
   if (envBase && envBase.trim().length > 0) return path.resolve(envBase);

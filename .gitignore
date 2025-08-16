@@ -12,7 +12,9 @@ dist/
 !/data/midi/.gitkeep
 /data/export/*
 !/data/export/.gitkeep
+# Per-process manifests
 /data/manifest.json
+/data/manifest.*.json
 
 # Misc
 .env

@@ -3,7 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { appendItem, getItemById, readManifest, resolveMidiDir, resolveExportDir } from "./storage.js";
+import { appendItem, getItemById, readManifest, resolveMidiDir, resolveExportDir, resolveBaseDir } from "./storage.js";
 // CoreMIDI (node-midi) は動的 import（macOS以外やCIでの存在を許容）
 let MidiOutput: any = null;
 async function loadMidi() {
@@ -40,16 +40,27 @@ async function main() {
 
   // fallback handler for tools/call
   (server as any).fallbackRequestHandler = async (request: any) => {
+    // Claude での表示互換: tools/call のレスポンスに content 配列を付与
+    const wrap = (data: any) => ({
+      ...data,
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(data),
+        },
+      ],
+    });
     // Claude Desktop からの tools/list / resources/list / prompts/list への応答
     if (request.method === "tools/list") {
-      const tools = [
+      const tools: any[] = [
         { name: "store_midi", description: "base64のMIDIを保存し、fileIdを返す", inputSchema: { type: "object", properties: { base64: { type: "string" }, name: { type: "string" } }, required: ["base64"] } },
         { name: "get_midi", description: "fileIdでMIDIメタ情報と任意でbase64を返す", inputSchema: { type: "object", properties: { fileId: { type: "string" }, includeBase64: { type: "boolean" } }, required: ["fileId"] } },
         { name: "list_midi", description: "保存済みMIDIの一覧（ページング）", inputSchema: { type: "object", properties: { limit: { type: "number" }, offset: { type: "number" } } } },
         { name: "export_midi", description: "fileIdをdata/exportへコピー", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
         { name: "list_devices", description: "MIDI出力デバイス一覧（暫定）", inputSchema: { type: "object", properties: {} } },
         { name: "playback_midi", description: "MIDI再生開始（PoC）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" } }, required: ["fileId"] } },
-        { name: "stop_playback", description: "playbackIdを停止", inputSchema: { type: "object", properties: { playbackId: { type: "string" } }, required: ["playbackId"] } }
+        { name: "stop_playback", description: "playbackIdを停止", inputSchema: { type: "object", properties: { playbackId: { type: "string" } }, required: ["playbackId"] } },
+        { name: "find_midi", description: "名前でMIDIを検索（部分一致）", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }
       ];
       return { tools } as any;
     }
@@ -97,10 +108,9 @@ async function main() {
       await fs.writeFile(absPath, data);
 
       const fileId = randomUUID();
-      // プロジェクトルートからの相対パスではなく data 直下に準拠した相対を保存
-      const relPath = path.relative(process.cwd(), absPath).includes("data/")
-        ? path.relative(process.cwd(), absPath)
-        : path.relative(path.resolve(midiDir, "..", ".."), absPath);
+  // ルートは storage.resolveBaseDir() 起点で data 相対を記録
+  const base = resolveBaseDir();
+  const relPath = path.relative(base, absPath);
       const createdAt = new Date().toISOString();
       const bytes = data.byteLength;
 
@@ -111,7 +121,7 @@ async function main() {
   // インメモリにも格納
   inMemoryIndex.set(fileId, record);
 
-      return { ok: true, fileId, path: relPath, bytes, createdAt } as any;
+  return wrap({ ok: true, fileId, path: relPath, bytes, createdAt }) as any;
     }
 
     // get_midi: retrieve file metadata and optionally base64 content
@@ -126,11 +136,11 @@ async function main() {
       
       if (!item) throw new Error(`fileId not found: ${fileId}`);
 
-  const absPath = path.resolve(item!.path.startsWith("/") ? item!.path : path.resolve(process.cwd(), item!.path));
+  const absPath = path.resolve(resolveBaseDir(), item!.path);
       const buf = includeBase64 ? await fs.readFile(absPath) : undefined;
       const base64 = includeBase64 && buf ? buf.toString("base64") : undefined;
 
-      return {
+      return wrap({
         ok: true,
         fileId: item.id,
         name: item.name,
@@ -138,7 +148,7 @@ async function main() {
         bytes: item.bytes,
         createdAt: item.createdAt,
         ...(includeBase64 && base64 ? { base64 } : {}),
-      } as any;
+      }) as any;
     }
 
     // list_midi: paginated list of MIDI files from manifest
@@ -157,7 +167,7 @@ async function main() {
 
       const total = items.length;
       const slice = items.slice(offset, offset + limit);
-      return { ok: true, total, items: slice } as any;
+  return wrap({ ok: true, total, items: slice }) as any;
     }
 
     // export_midi: copy file to data/export directory
@@ -170,14 +180,14 @@ async function main() {
       
       if (!item) throw new Error(`fileId not found: ${fileId}`);
 
-  const srcAbs = path.resolve(item.path.startsWith("/") ? item.path : path.resolve(process.cwd(), item.path));
+  const srcAbs = path.resolve(resolveBaseDir(), item.path);
   const exportDir = resolveExportDir();
   await fs.mkdir(exportDir, { recursive: true });
       const destAbs = path.join(exportDir, item.name);
       await fs.copyFile(srcAbs, destAbs);
-      const exportPath = path.relative(process.cwd(), destAbs);
+  const exportPath = path.relative(resolveBaseDir(), destAbs);
 
-      return { ok: true, exportPath } as any;
+  return wrap({ ok: true, exportPath }) as any;
     }
 
     // list_devices: CoreMIDI output devices (macOS only)
@@ -193,7 +203,7 @@ async function main() {
         );
       }
       
-      return { ok: true, devices } as any;
+  return wrap({ ok: true, devices }) as any;
     }
 
     // playback_midi: start MIDI playback (stubbed)
@@ -243,7 +253,7 @@ async function main() {
       (globalThis as any).__playbacks = (globalThis as any).__playbacks || new Map();
       (globalThis as any).__playbacks.set(playbackId, { fileId, portName: portName || null, startedAt: Date.now() });
 
-      return { ok: true, playbackId } as any;
+  return wrap({ ok: true, playbackId }) as any;
     }
 
     // stop_playback: stop a running playback (stubbed)
@@ -252,7 +262,17 @@ async function main() {
       if (!playbackId) throw new Error("'playbackId' is required for stop_playback");
       const map: Map<string, any> | undefined = (globalThis as any).__playbacks;
       if (map && map.has(playbackId)) map.delete(playbackId);
-      return { ok: true } as any;
+  return wrap({ ok: true }) as any;
+    }
+
+    // find_midi: name部分一致で候補を返す（UX補助）
+    if (name === "find_midi") {
+      const q: string = String(args?.query || "").trim();
+      if (!q) return { ok: true, items: [] } as any;
+      const manifest = await readManifest();
+      const qLower = q.toLowerCase();
+      const items = manifest.items.filter(i => i.name.toLowerCase().includes(qLower));
+  return wrap({ ok: true, items }) as any;
     }
 
     throw new Error(`Tool ${name} not found`);
