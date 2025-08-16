@@ -57,6 +57,7 @@ async function main() {
         { name: "export_midi", description: "fileIdをdata/exportへコピー", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
         { name: "list_devices", description: "MIDI出力デバイス一覧（暫定）", inputSchema: { type: "object", properties: {} } },
   { name: "play_smf", description: "SMFを解析し再生（dryRunで送出なし解析のみ）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" }, startMs: { type: "number" }, stopMs: { type: "number" }, dryRun: { type: "boolean" } }, required: ["fileId"] } },
+  { name: "get_playback_status", description: "再生ステータスを取得（進捗・総尺・デバイスなど）", inputSchema: { type: "object", properties: { playbackId: { type: "string" } }, required: ["playbackId"] } },
   { name: "playback_midi", description: "MIDI再生開始（PoC: durationMsで長さ指定可）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" }, durationMs: { type: "number" } }, required: ["fileId"] } },
         { name: "stop_playback", description: "playbackIdを停止", inputSchema: { type: "object", properties: { playbackId: { type: "string" } }, required: ["playbackId"] } },
         { name: "find_midi", description: "名前でMIDIを検索（部分一致）", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }
@@ -140,9 +141,10 @@ async function main() {
 
       // @tonejs/midi を動的import
       type Ev = { tMs: number; kind: 'on'|'off'; ch: number; n: number; v: number };
-      let scheduledEvents = 0;
-      let events: Ev[] = [];
+  let scheduledEvents = 0;
+  let events: Ev[] = [];
       const warnings: string[] = [];
+  let totalDurationMs = 0;
       try {
         const mod: any = await import('@tonejs/midi');
         const Midi = mod?.Midi || mod?.default?.Midi;
@@ -172,6 +174,9 @@ async function main() {
           // 先頭がNoteOffのみにならないようにする処理は今回は省略（受信側が安定）
         }
         scheduledEvents = events.length;
+        if (events.length > 0) {
+          totalDurationMs = events[events.length - 1]!.tMs;
+        }
       } catch (e: any) {
         warnings.push(`parse-warning: ${e?.message || String(e)}`);
       }
@@ -181,8 +186,8 @@ async function main() {
 
       // dryRun: 解析のみで即返す
       if (dryRun || events.length === 0) {
-        registry.set(playbackId, { fileId, startedAt: Date.now(), scheduledEvents, dryRun: true });
-        return wrap({ ok: true, playbackId, scheduledEvents, warnings: warnings.length ? warnings : undefined }) as any;
+        registry.set(playbackId, { fileId, startedAt: Date.now(), scheduledEvents, totalDurationMs, dryRun: true });
+        return wrap({ ok: true, playbackId, scheduledEvents, totalDurationMs, warnings: warnings.length ? warnings : undefined }) as any;
       }
 
       // 実再生: ルックアヘッドスケジューラ
@@ -191,16 +196,26 @@ async function main() {
         fileId: string;
         startedAt: number;
         scheduledEvents: number;
+        totalDurationMs: number;
         intervalId: any;
         timeouts: any[];
         active: Set<string>;
         out?: any;
+        cursor: number;
+        lastSentIndex: number;
+        lastSentAt: number;
+        lookahead: number;
+        tickInterval: number;
+        portIndex?: number;
+        portName?: string;
+        done?: boolean;
       } = {
-        type: 'smf', fileId, startedAt: Date.now(), scheduledEvents, intervalId: null, timeouts: [], active: new Set(), out: undefined
+        type: 'smf', fileId, startedAt: Date.now(), scheduledEvents, totalDurationMs, intervalId: null, timeouts: [], active: new Set(), out: undefined,
+        cursor: 0, lastSentIndex: -1, lastSentAt: 0, lookahead: 50, tickInterval: 10, portIndex: undefined, portName: undefined, done: false
       };
 
       // 出力デバイスを開く（macOS以外でもnode-midiがあれば開く）
-      try {
+  try {
         const Out = await loadMidi();
         if (Out) {
           const out = new Out();
@@ -210,7 +225,7 @@ async function main() {
             for (let i=0;i<ports;i++){ try{ const nm=o.getPortName(i); if (String(nm).toLowerCase().includes(hint)) return i; }catch{} }
             return -1;
           };
-          if (typeof args?.portName === 'string' && args.portName.length>0) {
+      if (typeof args?.portName === 'string' && args.portName.length>0) {
             const wanted = pickByHint(out, String(args.portName).toLowerCase());
             if (wanted>=0) target = wanted;
           } else {
@@ -221,6 +236,8 @@ async function main() {
           }
           out.openPort(target);
           state.out = out;
+      state.portIndex = target;
+      try { state.portName = String(out.getPortName?.(target)); } catch {}
         } else {
           warnings.push('node-midi not available: playback is a no-op');
         }
@@ -228,10 +245,10 @@ async function main() {
         warnings.push(`open-output-warning: ${e?.message || String(e)}`);
       }
 
-      const lookahead = 50; // ms
-      const tickInterval = 10; // ms
+    const lookahead = state.lookahead; // ms
+    const tickInterval = state.tickInterval; // ms
       const t0 = performance.now();
-      let cursor = 0;
+    let cursor = 0;
       function schedule(ev: Ev){
         // NoteOn/Off メッセージ生成
         const status = (ev.kind === 'on' ? 0x90 : 0x80) | (ev.ch & 0x0f);
@@ -243,23 +260,27 @@ async function main() {
             // active管理（ハングノート回避）
             const key = `${ev.ch}:${ev.n}`;
             if (ev.kind==='on') state.active.add(key); else state.active.delete(key);
+      state.lastSentAt = performance.now() - t0;
           } catch {}
         }, Math.max(0, due));
         state.timeouts.push(to);
+    state.lastSentIndex = Math.max(state.lastSentIndex, state.cursor);
       }
       const intervalId = setInterval(()=>{
         const now = performance.now();
         const playhead = now - t0;
         const windowEnd = playhead + lookahead;
-        while (cursor < events.length && events[cursor].tMs <= windowEnd) schedule(events[cursor++]);
-        if (cursor >= events.length) {
+    while (cursor < events.length && events[cursor].tMs <= windowEnd) schedule(events[cursor++]);
+    state.cursor = cursor;
+    if (cursor >= events.length) {
           clearInterval(intervalId);
+      state.done = true;
         }
       }, tickInterval);
       state.intervalId = intervalId;
 
       registry.set(playbackId, state);
-      return wrap({ ok: true, playbackId, scheduledEvents, warnings: warnings.length ? warnings : undefined }) as any;
+    return wrap({ ok: true, playbackId, scheduledEvents, totalDurationMs, warnings: warnings.length ? warnings : undefined }) as any;
     }
 
     // get_midi: retrieve file metadata and optionally base64 content
@@ -438,6 +459,34 @@ async function main() {
         map!.delete(playbackId);
       }
       return wrap({ ok: true }) as any;
+    }
+
+    // get_playback_status: 再生進捗と状態を返す
+    if (name === "get_playback_status") {
+      const playbackId: string | undefined = args?.playbackId;
+      if (!playbackId) throw new Error("'playbackId' is required for get_playback_status");
+      const map: Map<string, any> | undefined = (globalThis as any).__playbacks;
+      const st = map?.get(playbackId);
+      if (!st) return wrap({ ok: false, error: 'not_found' }) as any;
+      const now = performance.now();
+      const elapsedMs = now - (st.__t0 || now); // __t0 未保持でも0扱い
+      const resp = {
+        ok: true,
+        type: st.type,
+        fileId: st.fileId,
+        scheduledEvents: st.scheduledEvents,
+        totalDurationMs: st.totalDurationMs ?? undefined,
+        cursor: st.cursor ?? undefined,
+        lastSentIndex: st.lastSentIndex ?? undefined,
+        lastSentAt: st.lastSentAt ?? undefined,
+        lookahead: st.lookahead ?? undefined,
+        tickInterval: st.tickInterval ?? undefined,
+        portIndex: st.portIndex ?? undefined,
+        portName: st.portName ?? undefined,
+        activeNotes: st.active ? Array.from(st.active) : [],
+        done: !!st.done,
+      };
+      return wrap(resp) as any;
     }
 
     // find_midi: name部分一致で候補を返す（UX補助）
