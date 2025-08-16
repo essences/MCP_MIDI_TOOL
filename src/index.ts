@@ -56,6 +56,7 @@ async function main() {
         { name: "list_midi", description: "保存済みMIDIの一覧（ページング）", inputSchema: { type: "object", properties: { limit: { type: "number" }, offset: { type: "number" } } } },
         { name: "export_midi", description: "fileIdをdata/exportへコピー", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
         { name: "list_devices", description: "MIDI出力デバイス一覧（暫定）", inputSchema: { type: "object", properties: {} } },
+  { name: "play_smf", description: "SMFを解析し再生（現状はイベント解析と件数返却のみ）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" }, startMs: { type: "number" }, stopMs: { type: "number" } }, required: ["fileId"] } },
   { name: "playback_midi", description: "MIDI再生開始（PoC: durationMsで長さ指定可）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" }, durationMs: { type: "number" } }, required: ["fileId"] } },
         { name: "stop_playback", description: "playbackIdを停止", inputSchema: { type: "object", properties: { playbackId: { type: "string" } }, required: ["playbackId"] } },
         { name: "find_midi", description: "名前でMIDIを検索（部分一致）", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }
@@ -120,6 +121,41 @@ async function main() {
   inMemoryIndex.set(fileId, record);
 
   return wrap({ ok: true, fileId, path: relPath, bytes, createdAt }) as any;
+    }
+
+    // play_smf: parse SMF and (for now) return number of scheduled events
+    if (name === "play_smf") {
+      const fileId: string | undefined = args?.fileId;
+      if (!fileId) throw new Error("'fileId' is required for play_smf");
+
+      let item: ItemRec | undefined = inMemoryIndex.get(fileId);
+      if (!item) item = (await getItemById(fileId)) as ItemRec | undefined;
+      if (!item) throw new Error(`fileId not found: ${fileId}`);
+
+      const absPath = path.resolve(resolveBaseDir(), item.path);
+      const buf = await fs.readFile(absPath);
+
+      // @tonejs/midi を動的import
+      let scheduledEvents = 0;
+      const warnings: string[] = [];
+      try {
+        const mod: any = await import('@tonejs/midi');
+        const Midi = mod?.Midi || mod?.default?.Midi;
+        if (!Midi) throw new Error('Midi class not found in @tonejs/midi');
+        const midi = new Midi(buf);
+        // 簡易: 各トラックのnote数×2（On/Off）をイベント件数とみなす
+        let notes = 0;
+        for (const tr of midi.tracks) notes += (tr?.notes?.length || 0);
+        scheduledEvents = notes * 2;
+      } catch (e: any) {
+        warnings.push(`parse-warning: ${e?.message || String(e)}`);
+      }
+
+      const playbackId = randomUUID();
+      (globalThis as any).__playbacks = (globalThis as any).__playbacks || new Map();
+      (globalThis as any).__playbacks.set(playbackId, { fileId, startedAt: Date.now(), scheduledEvents });
+
+      return wrap({ ok: true, playbackId, scheduledEvents, warnings: warnings.length ? warnings : undefined }) as any;
     }
 
     // get_midi: retrieve file metadata and optionally base64 content

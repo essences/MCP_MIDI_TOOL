@@ -31,11 +31,22 @@
 - [ ] 観測性（構造化ログ、操作IDトレース、簡易メトリクス）
 - [ ] 設定ファイル（config/）の導入
 
-## R4（互換性）
-- [ ] Windows/LinuxのMIDI出力対応
+## R4（互換性 / クロスプラットフォーム化）
+- [~] node-midi 採用で CoreMIDI/MME/ALSA を共通抽象化
+- [ ] Windows/Linux のデバイス列挙と出力を実機で検証
+- [ ] CIで各OSビルド・最小再生スモークを追加
+
+## R6（実装: SMFプレイバック）
+- [ ] 依存導入: `midi`, `@tonejs/midi`
+- [ ] ツール追加: `play_smf { fileId, portName?, startMs?, stopMs? }`
+- [ ] 変換: SMF→イベント列（tMs付与・テンポ変化対応）
+- [ ] 送出: ルックアヘッド型スケジューラ（未消音ノート管理）
+- [ ] 停止: `stop_playback` で全ノート消音/タイマ解除
+- [ ] TDD: 固定テンポ/テンポ変化/停止/順序のテスト
+- [ ] スモーク: きらきら星SMFを store_midi→play_smf で再生
 
 ## リスク/ブロッカー
-- CoreMIDI依存のためmacOS以外は未対応
+- node-midi のネイティブビルドがOS/Nodeバージョンに依存
 - 大容量MIDIの処理時間
 
 ## 進捗メモ
@@ -45,3 +56,5 @@
 - 次は CoreMIDI 連携の実装強化（実デバイス列挙）、エラーモデル共通化、SMF再生スケジューラのTDDへ進む。
  - v2プロンプトで実機検証: list_devices→playback_midi(durationMs=800, portName部分一致) で発音確認済み。音が出る手順（durationMs/デバイス選択）をドキュメント化。
  - 受信側セットアップ（IAC/DAW）の手順書とチェックリストを追加: `docs/setup/macos_coremidi_receiver.md`, `docs/checklists/receiver_setup_checklist.md`。検証レポートを `docs/reports/2025-08-16_receiver_setup.md` に記録。
+ - 再生ライブラリ調査を追加: `docs/research/midi_playback_libraries.md`（案A: midi+@tonejs/midi+自作スケジューラ / 案B: JZZ+jzz-midi-smf）。
+ - 方針決定: `node-midi` を採用し、@tonejs/midi と自作スケジューラでSMF再生を実装。クロスプラットフォーム（macOS/CoreMIDI, Windows/MME, Linux/ALSA）を目標。
