@@ -32,6 +32,19 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
 }
 ```
 
+### 対応イベント一覧（現状）
+- ノート: note（ON/OFF、velocity、durationTicks）
+- コントロールチェンジ: cc（0–127）
+- ピッチベンド: pitchBend（-8192〜+8191）
+- プログラムチェンジ: program（0–127）
+- メタイベント:
+   - meta.tempo（usPerQuarter、トラック0へ集約）
+   - meta.timeSignature（トラック0へ集約・roundtripテスト済）
+   - meta.keySignature（エンコード対応／デコードは今後対応）
+   - meta.marker（デコード/エンコード対応）
+   - meta.trackName（デコード/エンコード対応）
+- スキーマ定義済み・今後実装拡充: aftertouch.channel / aftertouch.poly（エンコード/デコードとも対応予定）
+
 ## 主な機能（MCP Tools）
 - store_midi: base64のMIDIを保存し、fileIdを返す
 - get_midi: メタ情報を返し、任意でbase64を同梱
@@ -132,6 +145,18 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
 - 大容量SMFはdryRunで件数や総尺を把握し、範囲再生（startMs/stopMs）を推奨
 - 早期停止が見える場合は`get_playback_status`で進捗を確認し、スケジューラの窓/tickを調整
 - `stop_playback`は全ノート消音とポートクローズを行います（ハングノート対策）
+
+## FAQ / トラブルシューティング
+- node-midiのビルドに失敗します
+   - Node.jsとOSの対応ビルドが必要です。Node 20+を推奨。再ビルド: `npm rebuild midi`。CI環境では`node-gyp`等のビルドツールが必要です。
+- 出力ポートが見つかりません
+   - `list_devices`でポート名を確認し、`portName`に部分一致/正確な名称を指定。macOSではIAC Driverを有効化してください。
+- 再生しても音が出ません
+   - 受信アプリ/音源のMIDIインプット接続、チャンネル（デフォルトch1=0）、音源割当、モニタリングを確認。まず`dryRun:true`でイベント検出を確認。
+- 再生がカクつく/遅延します
+   - `schedulerLookaheadMs`を広げ、`schedulerTickMs`をやや大きく。CPU負荷が高いとタイマ精度が落ちるため、他の重い処理を避けて検証。
+- ハングノートが発生します
+   - `stop_playback`で全ノートオフを送出。発生原因として範囲再生の途中停止や受信側の処理落ちが考えられます。
 
 ## ライセンス
 - 本リポジトリ内のコード/ドキュメントのライセンスはリポジトリの LICENSE に従います（未定義の場合は別途合意）。
