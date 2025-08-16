@@ -58,3 +58,4 @@
  - 受信側セットアップ（IAC/DAW）の手順書とチェックリストを追加: `docs/setup/macos_coremidi_receiver.md`, `docs/checklists/receiver_setup_checklist.md`。検証レポートを `docs/reports/2025-08-16_receiver_setup.md` に記録。
  - 再生ライブラリ調査を追加: `docs/research/midi_playback_libraries.md`（案A: midi+@tonejs/midi+自作スケジューラ / 案B: JZZ+jzz-midi-smf）。
  - 方針決定: `node-midi` を採用し、@tonejs/midi と自作スケジューラでSMF再生を実装。クロスプラットフォーム（macOS/CoreMIDI, Windows/MME, Linux/ALSA）を目標。
+ - R6着手: `play_smf` ツールを追加（@tonejs/midiでSMF解析→イベント生成）。dryRun対応、実再生はルックアヘッド型スケジューラ（未消音ノート管理）。`stop_playback` を強化（タイマ解除・全ノート消音・ポートクローズ）。

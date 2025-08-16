@@ -54,7 +54,7 @@ describe("play_smf", () => {
     const fileId = storeResp.result.fileId as string;
 
     // 解析（再生はまだしない）
-    sendLine(child, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "play_smf", arguments: { fileId } } });
+  sendLine(child, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "play_smf", arguments: { fileId, dryRun: true } } });
     const psResp = await readLine(child);
     expect(psResp.error).toBeUndefined();
     expect(psResp.result.ok).toBe(true);
