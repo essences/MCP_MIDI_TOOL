@@ -81,12 +81,19 @@ export async function decodeSmfToJson(buf: Uint8Array | Buffer): Promise<JsonMid
     }
 
   // Notes
+    function midiToName(m: number): string {
+      const names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"] as const;
+      const n = Math.max(0, Math.min(127, Math.round(m)));
+      const name = names[n % 12];
+      const oct = Math.floor(n / 12) - 1; // MIDI: C-1=0
+      return `${name}${oct}`;
+    }
     for (const nt of (tr.notes || [])) {
       const tick = Math.max(0, Math.round(Number(nt.ticks) || 0));
       const duration = Math.max(1, Math.round(Number(nt.durationTicks) || 0));
       const pitch = Math.max(0, Math.min(127, Math.round(Number(nt.midi)))) as number;
       const velocity = Math.max(1, Math.min(127, Math.round(((Number(nt.velocity) || 0.7) * 127))));
-      const ev: any = { type: "note", tick, pitch, velocity, duration };
+      const ev: any = { type: "note", tick, pitch, note: midiToName(pitch), velocity, duration };
       if (channel !== undefined) ev.channel = channel;
       events.push(ev);
     }

@@ -18,22 +18,24 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
 2) json_to_smf: JSONをSMFへコンパイルして保存（fileId取得）
 3) play_smf: `dryRun:true`で解析（scheduledEvents/totalDurationMsを確認）→ 実再生
 
-最小JSON例（概略・スキーマ準拠）:
+最小JSON例（概略・スキーマ準拠｜ピッチ番号 or 音名指定の両対応）:
 ```json
 {
    "ppq": 480,
    "tracks": [
          { "events": [ { "type": "meta.tempo", "usPerQuarter": 500000, "tick": 0 } ] },
-      { "channel": 0, "events": [
-         { "type": "program", "program": 0, "tick": 0 },
-            { "type": "note", "pitch": 60, "velocity": 100, "tick": 0, "duration": 960 }
-      ]}
+         { "channel": 0, "events": [
+            { "type": "program", "program": 0, "tick": 0 },
+            { "type": "note", "note": "C4", "velocity": 100, "tick": 0, "duration": 960 },
+            { "type": "note", "pitch": 64,  "velocity": 100, "tick": 960, "duration": 240 }
+         ] }
    ]
 }
 ```
 
 ### 対応イベント一覧（現状）
 - ノート: note（ON/OFF、velocity、durationTicks）
+   - ピッチ指定は2通り: `pitch`(0..127) または `note`(音名: C4, F#3, Bb5 等)。SMF→JSONでは両方が付与されます。
 - コントロールチェンジ: cc（0–127）
 - ピッチベンド: pitchBend（-8192〜+8191）
 - プログラムチェンジ: program（0–127）

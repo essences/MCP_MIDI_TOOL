@@ -7,7 +7,7 @@
 ## 最優先（Next Up / Top 10）
 1. [x] R7: JSONスキーマ起草（`docs/specs/json_midi_schema_v1.md`・Zod型・順序ルール（初版））
 2. [x] R7: ツール `json_to_smf { json, name? }`（検証→コンパイル→保存｜最小エンコーダ＋メトリクス）
-3. [x] R7: ツール `smf_to_json { fileId }`（解析→JSON化｜最小機能＋メトリクス｜tempo/timeSig/marker/trackName/cc/pb/program/notes）
+3. [x] R7: ツール `smf_to_json { fileId }`（解析→JSON化｜最小機能＋メトリクス｜tempo/timeSig/keySig/marker/trackName/cc/pb/program/notes）
 4. [~] R6: TDD強化（固定テンポ/テンポ変化/停止/順序・totalDurationMs検証｜継続）
 5. [ ] R3: 観測性（構造化ログ/共通エラーモデル/操作IDトレース）※変換メトリクスは実装済み
 6. [~] R2: メタ情報抽出の拡充（ppq/トラック数/イベント数/bytesは実装済み、totalDurationMsはplay_smf(dryRun)で返却）
@@ -66,7 +66,8 @@
 - [x] ツール: `smf_to_json { fileId }`（解析→JSON化｜最小機能）
 - [ ] プロンプト: JSON生成→保存→dryRun→再生の手順書
 - [~] テスト: ラウンドトリップ（JSON→SMF→JSON）と代表イベント（note/cc/pitchBend/program/timeSigは済、keySig/aftertouchは未）
-- [ ] デコード拡充: keySignature（meta.keySignature）
+- [x] デコード拡充: keySignature（meta.keySignature）
+ - [x] JSON入力: ノート音名 `note: "C4"` 等の受け付け（エンコード時にMIDI番号へ変換、デコード時は `pitch` と `note` を併記）
 - [ ] イベント拡充: aftertouch.channel / aftertouch.poly（エンコード/デコード）
 
 ## リスク/ブロッカー

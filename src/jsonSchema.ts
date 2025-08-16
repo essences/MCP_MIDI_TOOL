@@ -3,6 +3,7 @@ import { z } from "zod";
 export const zTick = z.number().int().min(0);
 export const zChan = z.number().int().min(0).max(15);
 export const zPitch = z.number().int().min(0).max(127);
+const zNoteName = z.string().regex(/^[A-Ga-g][#b]?-?\d+$/);
 export const zVel = z.number().int().min(1).max(127);
 export const zDur = z.number().int().min(1);
 
@@ -12,7 +13,9 @@ const zCCNum = z.number().int().min(0).max(127);
 const zEvtNote = z.object({
   type: z.literal("note"),
   tick: zTick,
-  pitch: zPitch,
+  // pitch(数値) または note(音名: C4, F#3, Bb5 等) のいずれかを想定（両方省略は実装側で弾く）
+  pitch: zPitch.optional(),
+  note: zNoteName.optional(),
   velocity: zVel,
   duration: zDur,
   channel: zChan.optional(),

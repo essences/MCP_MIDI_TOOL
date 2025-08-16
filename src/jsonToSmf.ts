@@ -57,6 +57,23 @@ export function encodeToSmfBinary(song: JsonMidiSong): Uint8Array {
   const ppq = song.ppq || 480;
   const format = (song.format === 0 ? 0 : 1) as 0 | 1;
 
+  // 音名→MIDIノート番号（C4=60基準）
+  const NOTE_BASE: Record<string, number> = { C:0, "C#":1, Db:1, D:2, "D#":3, Eb:3, E:4, F:5, "F#":6, Gb:6, G:7, "G#":8, Ab:8, A:9, "A#":10, Bb:10, B:11 };
+  function nameToMidi(n?: string): number | undefined {
+    if (!n) return undefined;
+    const m = /^([A-Ga-g])([#b]?)-?(\d+)$/.exec(n.trim());
+    if (!m) return undefined;
+    let [_, L, acc, octStr] = m;
+    const letter = L.toUpperCase();
+    const key = (letter + (acc || "")) as keyof typeof NOTE_BASE;
+    const base = NOTE_BASE[key];
+    if (base === undefined) return undefined;
+    const oct = Number(octStr);
+    if (!Number.isFinite(oct)) return undefined;
+    const midi = base + (oct + 1) * 12; // MIDI: C-1=0 → C4(=60)
+    return (midi >= 0 && midi <= 127) ? midi : undefined;
+  }
+
   // Prepare per-track EncEvent lists
   const makeEncEventsForTrack = (trackIndex: number) => {
     const tr = song.tracks[trackIndex]!;
@@ -96,7 +113,8 @@ export function encodeToSmfBinary(song: JsonMidiSong): Uint8Array {
       }
       if (e.type === "note") {
         const ch = Number.isFinite(Number(e.channel)) ? (e.channel as number) : (chDefault ?? 0);
-        const n = Math.max(0, Math.min(127, e.pitch|0));
+        const nRaw = (e as any).pitch ?? nameToMidi((e as any).note);
+        const n = Math.max(0, Math.min(127, Number(nRaw)|0));
         const v = Math.max(1, Math.min(127, e.velocity|0));
         const tOn = e.tick|0;
         const tOff = Math.max(tOn, tOn + (e.duration|0));
