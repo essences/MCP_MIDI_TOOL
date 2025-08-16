@@ -5,9 +5,9 @@
 凡例: [ ] 未着手 / [~] 進行中 / [x] 完了 / [!] ブロック
 
 ## 最優先（Next Up / Top 10）
-1. [ ] R7: JSONスキーマ起草（`docs/specs/json_midi_schema_v1.md`・Zod型・順序ルール）
-2. [ ] R7: ツール `json_to_smf { json, name? }`（検証→コンパイル→保存）
-3. [ ] R7: ツール `smf_to_json { fileId }`（解析→JSON化）
+1. [x] R7: JSONスキーマ起草（`docs/specs/json_midi_schema_v1.md`・Zod型・順序ルール（初版））
+2. [x] R7: ツール `json_to_smf { json, name? }`（検証→コンパイル→保存｜最小エンコーダ）
+3. [~] R7: ツール `smf_to_json { fileId }`（解析→JSON化｜最小機能）
 4. [~] R6: TDD強化（固定テンポ/テンポ変化/停止/順序・totalDurationMs検証）
 5. [ ] R3: 観測性（構造化ログ/共通エラーモデル/操作IDトレース）
 6. [ ] R2: メタ情報抽出の拡充（durationMs/ppq/トラック数/イベント数）
@@ -60,9 +60,9 @@
 
 ## R7（JSONファースト: 作曲/編集）
 - [x] ADR: JSONファースト採用（`docs/adr/ADR-0002-json-first-composition.md`）
-- [ ] 仕様: `docs/specs/json_midi_schema_v1.md`（Zod型・順序ルール）
-- [ ] ツール: `json_to_smf { json, name? }`（検証→コンパイル→保存）
-- [ ] ツール: `smf_to_json { fileId }`（解析→JSON化）
+- [x] 仕様: `docs/specs/json_midi_schema_v1.md`（Zod型・順序ルール・初版）
+- [x] ツール: `json_to_smf { json, name? }`（検証→コンパイル→保存｜最小エンコーダ）
+- [~] ツール: `smf_to_json { fileId }`（解析→JSON化｜最小機能）
 - [ ] プロンプト: JSON生成→保存→dryRun→再生の手順書
 - [ ] テスト: ラウンドトリップ（JSON→SMF→JSON）と代表イベント
 

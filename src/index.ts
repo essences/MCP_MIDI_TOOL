@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { appendItem, getItemById, readManifest, resolveMidiDir, resolveExportDir, resolveBaseDir } from "./storage.js";
 import { zSong } from "./jsonSchema.js";
 import { encodeToSmfBinary } from "./jsonToSmf.js";
+import { decodeSmfToJson } from "./smfToJson.js";
 // CoreMIDI (node-midi) は動的 import（macOS以外やCIでの存在を許容）
 let MidiOutput: any = null;
 async function loadMidi() {
@@ -55,6 +56,7 @@ async function main() {
       const tools: any[] = [
         { name: "store_midi", description: "base64のMIDIを保存し、fileIdを返す", inputSchema: { type: "object", properties: { base64: { type: "string" }, name: { type: "string" } }, required: ["base64"] } },
   { name: "json_to_smf", description: "JSON曲データをSMFにコンパイルし保存", inputSchema: { type: "object", properties: { json: { type: "object" }, name: { type: "string" } , overwrite: { type: "boolean" } }, required: ["json"] } },
+  { name: "smf_to_json", description: "SMFを解析してJSON曲データに変換", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
         { name: "get_midi", description: "fileIdでMIDIメタ情報と任意でbase64を返す", inputSchema: { type: "object", properties: { fileId: { type: "string" }, includeBase64: { type: "boolean" } }, required: ["fileId"] } },
         { name: "list_midi", description: "保存済みMIDIの一覧（ページング）", inputSchema: { type: "object", properties: { limit: { type: "number" }, offset: { type: "number" } } } },
         { name: "export_midi", description: "fileIdをdata/exportへコピー", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
@@ -164,6 +166,21 @@ async function main() {
       inMemoryIndex.set(fileId, record);
 
       return wrap({ ok: true, fileId, path: relPath, bytes, createdAt }) as any;
+    }
+
+    // smf_to_json: read SMF, parse with @tonejs/midi, convert to JSON schema
+    if (name === "smf_to_json") {
+      const fileId: string | undefined = args?.fileId;
+      if (!fileId) throw new Error("'fileId' is required for smf_to_json");
+
+      let item: ItemRec | undefined = inMemoryIndex.get(fileId);
+      if (!item) item = (await getItemById(fileId)) as ItemRec | undefined;
+      if (!item) throw new Error(`fileId not found: ${fileId}`);
+
+      const absPath = path.resolve(resolveBaseDir(), item.path);
+      const buf = await fs.readFile(absPath);
+      const json = await decodeSmfToJson(buf);
+      return wrap({ ok: true, json }) as any;
     }
 
     // play_smf: parse SMF and schedule playback (or dryRun for analysis only)
