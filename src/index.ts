@@ -3,7 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { appendItem, getItemById, readManifest } from "./storage.js";
+import { appendItem, getItemById, readManifest, resolveMidiDir, resolveExportDir } from "./storage.js";
 // CoreMIDI (node-midi) は動的 import（macOS以外やCIでの存在を許容）
 let MidiOutput: any = null;
 async function loadMidi() {
@@ -91,13 +91,16 @@ async function main() {
         ? safeName 
         : `${safeName}.mid`;
 
-      const midiDir = path.resolve(process.cwd(), "data", "midi");
-      const absPath = path.join(midiDir, nameWithExt);
-      await fs.mkdir(midiDir, { recursive: true });
+  const midiDir = resolveMidiDir();
+  const absPath = path.join(midiDir, nameWithExt);
+  await fs.mkdir(midiDir, { recursive: true });
       await fs.writeFile(absPath, data);
 
       const fileId = randomUUID();
-      const relPath = path.relative(process.cwd(), absPath);
+      // プロジェクトルートからの相対パスではなく data 直下に準拠した相対を保存
+      const relPath = path.relative(process.cwd(), absPath).includes("data/")
+        ? path.relative(process.cwd(), absPath)
+        : path.relative(path.resolve(midiDir, "..", ".."), absPath);
       const createdAt = new Date().toISOString();
       const bytes = data.byteLength;
 
@@ -123,7 +126,7 @@ async function main() {
       
       if (!item) throw new Error(`fileId not found: ${fileId}`);
 
-      const absPath = path.resolve(process.cwd(), item!.path);
+  const absPath = path.resolve(item!.path.startsWith("/") ? item!.path : path.resolve(process.cwd(), item!.path));
       const buf = includeBase64 ? await fs.readFile(absPath) : undefined;
       const base64 = includeBase64 && buf ? buf.toString("base64") : undefined;
 
@@ -167,9 +170,9 @@ async function main() {
       
       if (!item) throw new Error(`fileId not found: ${fileId}`);
 
-      const srcAbs = path.resolve(process.cwd(), item.path);
-      const exportDir = path.resolve(process.cwd(), "data", "export");
-      await fs.mkdir(exportDir, { recursive: true });
+  const srcAbs = path.resolve(item.path.startsWith("/") ? item.path : path.resolve(process.cwd(), item.path));
+  const exportDir = resolveExportDir();
+  await fs.mkdir(exportDir, { recursive: true });
       const destAbs = path.join(exportDir, item.name);
       await fs.copyFile(srcAbs, destAbs);
       const exportPath = path.relative(process.cwd(), destAbs);
