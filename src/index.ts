@@ -21,11 +21,7 @@ async function loadMidi() {
 type ItemRec = { id: string; name: string; path: string; bytes: number; createdAt: string };
 const inMemoryIndex = new Map<string, ItemRec>();
 
-// プロセス分離されたマニフェスト（並列テストによる破損回避）
-function getManifestPath() {
-  const file = process.env.MCP_MIDI_MANIFEST || `manifest.${process.pid}.json`;
-  return path.resolve(process.cwd(), "data", file);
-}
+// マニフェストは storage.ts 経由で参照（getItemById/readManifest）
 
 // Minimal MCP server with tools: store_midi, get_midi, list_midi, export_midi, list_devices
 async function main() {
@@ -212,16 +208,9 @@ async function main() {
       const portName: string | undefined = args?.portName;
       if (!fileId) throw new Error("'fileId' is required for playback_midi");
 
-      // ファイル存在チェック
-      const manifestPath = getManifestPath();
-      let item: ItemRec | undefined = inMemoryIndex.get(fileId);
-      if (!item) {
-        try {
-          const raw = await fs.readFile(manifestPath, "utf8");
-          const manifest = JSON.parse(raw) as { items: ItemRec[] };
-          item = manifest.items.find((x) => x.id === fileId);
-        } catch {}
-      }
+  // ファイル存在チェック（インメモリ→ストレージ）
+  let item: ItemRec | undefined = inMemoryIndex.get(fileId);
+  if (!item) item = (await getItemById(fileId)) as ItemRec | undefined;
       if (!item) throw new Error(`fileId not found: ${fileId}`);
 
       // macOSで node-midi が利用可能な場合のみ、即時に開閉する簡易送出でPoC
@@ -268,7 +257,7 @@ async function main() {
     // find_midi: name部分一致で候補を返す（UX補助）
     if (name === "find_midi") {
       const q: string = String(args?.query || "").trim();
-      if (!q) return { ok: true, items: [] } as any;
+      if (!q) return wrap({ ok: true, items: [] }) as any;
       const manifest = await readManifest();
       const qLower = q.toLowerCase();
       const items = manifest.items.filter(i => i.name.toLowerCase().includes(qLower));
