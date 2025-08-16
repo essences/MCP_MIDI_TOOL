@@ -45,7 +45,8 @@ find_midi を query="twinkle" で呼び、最新の items[0].id を “FILE_ID�
 ```
 play_smf を dryRun で実行し、イベント件数とタイム順を確認してください。
 - 入力: { fileId: "FILE_ID", dryRun: true }
-- 出力: scheduledEvents の件数を表示し、先頭3件と末尾3件の tMs/type/ch/num/vel などを抜粋して表示してください。
+- 出力: scheduledEvents と totalDurationMs を表示し、先頭3件と末尾3件の tMs/type/ch/num/vel などを抜粋して表示してください。
+- 参考: 8秒継続SMFの生成スニペットは docs/snippets/continuous_chords_smf_8s.md を参照
 ```
 想定結果のポイント:
 - scheduledEvents が 2件以上（NoteOn/NoteOff）あること。
@@ -62,6 +63,7 @@ play_smf を実再生で呼びます。5〜10秒後に停止するので、返�
 補足:
 - portName は部分一致で選択されます。未指定時は IAC/Network/Virtual を優先して自動選択します。
 - 再生はルックアヘッド型スケジューラで送出されます。
+ - 進捗の観測には get_playback_status { playbackId: "PB_ID" } を利用できます（cursor/lastSentAt/totalDurationMsなど）。
 
 ---
 
