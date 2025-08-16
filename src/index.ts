@@ -54,7 +54,7 @@ async function main() {
         { name: "list_midi", description: "保存済みMIDIの一覧（ページング）", inputSchema: { type: "object", properties: { limit: { type: "number" }, offset: { type: "number" } } } },
         { name: "export_midi", description: "fileIdをdata/exportへコピー", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
         { name: "list_devices", description: "MIDI出力デバイス一覧（暫定）", inputSchema: { type: "object", properties: {} } },
-        { name: "playback_midi", description: "MIDI再生開始（PoC）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" } }, required: ["fileId"] } },
+  { name: "playback_midi", description: "MIDI再生開始（PoC: durationMsで長さ指定可）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" }, durationMs: { type: "number" } }, required: ["fileId"] } },
         { name: "stop_playback", description: "playbackIdを停止", inputSchema: { type: "object", properties: { playbackId: { type: "string" } }, required: ["playbackId"] } },
         { name: "find_midi", description: "名前でMIDIを検索（部分一致）", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }
       ];
@@ -189,23 +189,34 @@ async function main() {
     // list_devices: CoreMIDI output devices (macOS only)
     if (name === "list_devices") {
       const devices: Array<{ id: string; name: string }> = [];
-      
       if (process.platform === "darwin") {
-        // Minimal implementation with fixed devices
-        // Real implementation would use node-midi or AudioToolbox FFI
-        devices.push(
-          { id: "builtin-synth", name: "Built-in Synthesizer" },
-          { id: "iac-bus-1", name: "IAC Driver Bus 1" }
-        );
+        try {
+          const Out = await loadMidi();
+          if (Out) {
+            const out = new Out();
+            const count = typeof out.getPortCount === "function" ? out.getPortCount() : 0;
+            for (let i = 0; i < count; i++) {
+              try {
+                const n = out.getPortName(i);
+                devices.push({ id: String(i), name: String(n) });
+              } catch {}
+            }
+          }
+        } catch {}
+        // フォールバック（少なくとも1つ返す）
+        if (devices.length === 0) {
+          devices.push({ id: "iac-bus-1", name: "IAC Driver Bus 1" });
+        }
       }
-      
-  return wrap({ ok: true, devices }) as any;
+      return wrap({ ok: true, devices }) as any;
     }
 
     // playback_midi: start MIDI playback (stubbed)
   if (name === "playback_midi") {
-      const fileId: string | undefined = args?.fileId;
-      const portName: string | undefined = args?.portName;
+  const fileId: string | undefined = args?.fileId;
+  const portName: string | undefined = args?.portName;
+  const durationMsRaw = args?.durationMs;
+  const durationMs = Number.isFinite(Number(durationMsRaw)) && Number(durationMsRaw) > 0 ? Math.min(Number(durationMsRaw), 2000) : 300;
       if (!fileId) throw new Error("'fileId' is required for playback_midi");
 
   // ファイル存在チェック（インメモリ→ストレージ）
@@ -220,17 +231,32 @@ async function main() {
         if (Out) {
           const out = new Out();
           const ports = out.getPortCount();
+          // ポート選択: 指定があれば部分一致（大文字小文字無視）、無ければIAC/Network/Virtual優先、無ければ0
           let target = 0;
-          if (typeof portName === 'string' && portName.length > 0) {
+          const pickByHint = (hint: string) => {
             for (let i = 0; i < ports; i++) {
-              const name = out.getPortName(i);
-              if (name.includes(portName)) { target = i; break; }
+              try {
+                const name = out.getPortName(i);
+                if (String(name).toLowerCase().includes(hint)) return i;
+              } catch {}
             }
+            return -1;
+          };
+          if (typeof portName === 'string' && portName.length > 0) {
+            const wanted = pickByHint(String(portName).toLowerCase());
+            if (wanted >= 0) target = wanted;
+          } else {
+            const pref = pickByHint('iac');
+            const net = pref < 0 ? pickByHint('network') : pref;
+            const vir = net < 0 ? pickByHint('virtual') : net;
+            if (vir >= 0) target = vir;
           }
           try {
             out.openPort(target);
             // 簡易確認: Middle C を短く鳴らす（Note On/Off）
             out.sendMessage([0x90, 60, 100]);
+            // 指定時間だけ維持
+            await new Promise(res => setTimeout(res, durationMs));
             out.sendMessage([0x80, 60, 0]);
           } finally {
             try { out.closePort(); } catch {}
