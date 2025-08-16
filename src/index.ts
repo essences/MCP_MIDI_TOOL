@@ -248,8 +248,9 @@ async function main() {
     const lookahead = state.lookahead; // ms
     const tickInterval = state.tickInterval; // ms
       const t0 = performance.now();
+      (state as any).__t0 = t0;
     let cursor = 0;
-      function schedule(ev: Ev){
+      function schedule(ev: Ev, idx: number){
         // NoteOn/Off メッセージ生成
         const status = (ev.kind === 'on' ? 0x90 : 0x80) | (ev.ch & 0x0f);
         const msg = [status, ev.n & 0x7f, ev.v & 0x7f];
@@ -264,13 +265,16 @@ async function main() {
           } catch {}
         }, Math.max(0, due));
         state.timeouts.push(to);
-    state.lastSentIndex = Math.max(state.lastSentIndex, state.cursor);
+        state.lastSentIndex = Math.max(state.lastSentIndex, idx);
       }
       const intervalId = setInterval(()=>{
         const now = performance.now();
         const playhead = now - t0;
         const windowEnd = playhead + lookahead;
-    while (cursor < events.length && events[cursor].tMs <= windowEnd) schedule(events[cursor++]);
+        while (cursor < events.length && events[cursor].tMs <= windowEnd) {
+          schedule(events[cursor], cursor);
+          cursor++;
+        }
     state.cursor = cursor;
     if (cursor >= events.length) {
           clearInterval(intervalId);
