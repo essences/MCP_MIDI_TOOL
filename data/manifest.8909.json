@@ -1,0 +1,18 @@
+{
+  "items": [
+    {
+      "id": "36fc17d2-96ae-4eb0-9552-6f671a6168ca",
+      "name": "list-a.mid",
+      "path": "data/midi/list-a.mid",
+      "bytes": 3,
+      "createdAt": "2025-08-16T02:23:15.782Z"
+    },
+    {
+      "id": "4bdd65f1-ed1b-4ca7-a12f-303ca274944d",
+      "name": "list-b.mid",
+      "path": "data/midi/list-b.mid",
+      "bytes": 3,
+      "createdAt": "2025-08-16T02:23:15.787Z"
+    }
+  ]
+}

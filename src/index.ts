@@ -32,11 +32,39 @@ async function main() {
   const transport = new StdioServerTransport();
   const server = new Server(
     { name: "mcp-midi-tool", version: "0.1.0" },
-    { capabilities: { tools: {} } }
+  // prompts/resources を明示してクライアント側の探索フローと互換性を持たせる
+  { capabilities: { tools: {}, prompts: {}, resources: {} } }
   );
+
+  
 
   // fallback handler for tools/call
   (server as any).fallbackRequestHandler = async (request: any) => {
+    // Claude Desktop からの tools/list / resources/list / prompts/list への応答
+    if (request.method === "tools/list") {
+      const tools = [
+        { name: "store_midi", description: "base64のMIDIを保存し、fileIdを返す", inputSchema: { type: "object", properties: { base64: { type: "string" }, name: { type: "string" } }, required: ["base64"] } },
+        { name: "get_midi", description: "fileIdでMIDIメタ情報と任意でbase64を返す", inputSchema: { type: "object", properties: { fileId: { type: "string" }, includeBase64: { type: "boolean" } }, required: ["fileId"] } },
+        { name: "list_midi", description: "保存済みMIDIの一覧（ページング）", inputSchema: { type: "object", properties: { limit: { type: "number" }, offset: { type: "number" } } } },
+        { name: "export_midi", description: "fileIdをdata/exportへコピー", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
+        { name: "list_devices", description: "MIDI出力デバイス一覧（暫定）", inputSchema: { type: "object", properties: {} } },
+        { name: "playback_midi", description: "MIDI再生開始（PoC）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" } }, required: ["fileId"] } },
+        { name: "stop_playback", description: "playbackIdを停止", inputSchema: { type: "object", properties: { playbackId: { type: "string" } }, required: ["playbackId"] } }
+      ];
+      return { tools } as any;
+    }
+    if (request.method === "resources/list") {
+      return { resources: [] } as any;
+    }
+    if (request.method === "prompts/list") {
+      // 現時点ではプロンプトは未提供。空配列を返す。
+      return { prompts: [] } as any;
+    }
+    if (request.method === "prompts/get") {
+      // 利用予定なし。呼ばれた場合は存在しない旨のエラーを返す。
+      throw new Error("Prompt not found");
+    }
+
     if (request.method !== "tools/call") return undefined;
     const { name, arguments: args } = request.params as { name: string; arguments?: any };
 
