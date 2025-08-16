@@ -4,6 +4,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { appendItem, getItemById, readManifest, resolveMidiDir, resolveExportDir, resolveBaseDir } from "./storage.js";
+import { zSong } from "./jsonSchema.js";
+import { encodeToSmfBinary } from "./jsonToSmf.js";
 // CoreMIDI (node-midi) は動的 import（macOS以外やCIでの存在を許容）
 let MidiOutput: any = null;
 async function loadMidi() {
@@ -52,6 +54,7 @@ async function main() {
     if (request.method === "tools/list") {
       const tools: any[] = [
         { name: "store_midi", description: "base64のMIDIを保存し、fileIdを返す", inputSchema: { type: "object", properties: { base64: { type: "string" }, name: { type: "string" } }, required: ["base64"] } },
+  { name: "json_to_smf", description: "JSON曲データをSMFにコンパイルし保存", inputSchema: { type: "object", properties: { json: { type: "object" }, name: { type: "string" } , overwrite: { type: "boolean" } }, required: ["json"] } },
         { name: "get_midi", description: "fileIdでMIDIメタ情報と任意でbase64を返す", inputSchema: { type: "object", properties: { fileId: { type: "string" }, includeBase64: { type: "boolean" } }, required: ["fileId"] } },
         { name: "list_midi", description: "保存済みMIDIの一覧（ページング）", inputSchema: { type: "object", properties: { limit: { type: "number" }, offset: { type: "number" } } } },
         { name: "export_midi", description: "fileIdをdata/exportへコピー", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
@@ -122,6 +125,45 @@ async function main() {
   inMemoryIndex.set(fileId, record);
 
   return wrap({ ok: true, fileId, path: relPath, bytes, createdAt }) as any;
+    }
+
+    // json_to_smf: validate JSON via zod, compile to SMF, save, update manifest
+    if (name === "json_to_smf") {
+      const json = args?.json;
+      const fileNameInput: string | undefined = args?.name;
+      if (!json) throw new Error("'json' is required for json_to_smf");
+
+      const parsed = zSong.safeParse(json);
+      if (!parsed.success) {
+        const issues = parsed.error.issues?.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
+        throw new Error(`json validation failed: ${issues || parsed.error.message}`);
+      }
+
+      const song = parsed.data;
+      const bin = encodeToSmfBinary(song);
+      const data = Buffer.from(bin.buffer, bin.byteOffset, bin.byteLength);
+
+      const safeName = (fileNameInput && fileNameInput.trim().length > 0
+        ? fileNameInput.trim()
+        : `json-${Date.now()}.mid`);
+      const nameWithExt = safeName.toLowerCase().endsWith(".mid") ? safeName : `${safeName}.mid`;
+
+      const midiDir = resolveMidiDir();
+      await fs.mkdir(midiDir, { recursive: true });
+      const absPath = path.join(midiDir, nameWithExt);
+      await fs.writeFile(absPath, data);
+
+      const fileId = randomUUID();
+      const base = resolveBaseDir();
+      const relPath = path.relative(base, absPath);
+      const createdAt = new Date().toISOString();
+      const bytes = data.byteLength;
+
+      const record = { id: fileId, name: nameWithExt, path: relPath, bytes, createdAt };
+      await appendItem(record);
+      inMemoryIndex.set(fileId, record);
+
+      return wrap({ ok: true, fileId, path: relPath, bytes, createdAt }) as any;
     }
 
     // play_smf: parse SMF and schedule playback (or dryRun for analysis only)
