@@ -1,16 +1,16 @@
 # プロダクトバックログ - MCP MIDI TOOL
 
-更新日: 2025-08-17（優先順位を再評価）
+更新日: 2025-08-17（優先順位を再評価｜README拡充・メトリクス反映済み）
 
 凡例: [ ] 未着手 / [~] 進行中 / [x] 完了 / [!] ブロック
 
 ## 最優先（Next Up / Top 10）
 1. [x] R7: JSONスキーマ起草（`docs/specs/json_midi_schema_v1.md`・Zod型・順序ルール（初版））
-2. [x] R7: ツール `json_to_smf { json, name? }`（検証→コンパイル→保存｜最小エンコーダ）
-3. [~] R7: ツール `smf_to_json { fileId }`（解析→JSON化｜最小機能）
-4. [~] R6: TDD強化（固定テンポ/テンポ変化/停止/順序・totalDurationMs検証）
-5. [ ] R3: 観測性（構造化ログ/共通エラーモデル/操作IDトレース）
-6. [ ] R2: メタ情報抽出の拡充（durationMs/ppq/トラック数/イベント数）
+2. [x] R7: ツール `json_to_smf { json, name? }`（検証→コンパイル→保存｜最小エンコーダ＋メトリクス）
+3. [x] R7: ツール `smf_to_json { fileId }`（解析→JSON化｜最小機能＋メトリクス｜tempo/timeSig/marker/trackName/cc/pb/program/notes）
+4. [~] R6: TDD強化（固定テンポ/テンポ変化/停止/順序・totalDurationMs検証｜継続）
+5. [ ] R3: 観測性（構造化ログ/共通エラーモデル/操作IDトレース）※変換メトリクスは実装済み
+6. [~] R2: メタ情報抽出の拡充（ppq/トラック数/イベント数/bytesは実装済み、totalDurationMsはplay_smf(dryRun)で返却）
 7. [ ] R2: エクスポートの名前衝突回避と履歴（連番/ハッシュ）
 8. [ ] R4: CIで各OSのビルドとdryRunスモーク（macOS/Windows/Linux）
 9. [ ] R4: Windows/Linux のデバイス列挙・出力の実機検証
@@ -33,6 +33,7 @@
 - [ ] ツール: transform_midi（transpose/quantize）
 - [ ] ログ/エラーモデルの共通化
 - [x] 最小テスト（ユニット/結合）
+ - [x] README拡充（JSONファースト、ツールI/O、クイックフロー、イベント一覧、FAQ、MCP呼び出し例、メトリクス解説）
 
 ## R2（拡張）
 - [ ] メタ情報抽出の拡充（durationMs/ppq/トラック数/イベント数）
@@ -62,9 +63,11 @@
 - [x] ADR: JSONファースト採用（`docs/adr/ADR-0002-json-first-composition.md`）
 - [x] 仕様: `docs/specs/json_midi_schema_v1.md`（Zod型・順序ルール・初版）
 - [x] ツール: `json_to_smf { json, name? }`（検証→コンパイル→保存｜最小エンコーダ）
-- [~] ツール: `smf_to_json { fileId }`（解析→JSON化｜最小機能）
+- [x] ツール: `smf_to_json { fileId }`（解析→JSON化｜最小機能）
 - [ ] プロンプト: JSON生成→保存→dryRun→再生の手順書
-- [ ] テスト: ラウンドトリップ（JSON→SMF→JSON）と代表イベント
+- [~] テスト: ラウンドトリップ（JSON→SMF→JSON）と代表イベント（note/cc/pitchBend/program/timeSigは済、keySig/aftertouchは未）
+- [ ] デコード拡充: keySignature（meta.keySignature）
+- [ ] イベント拡充: aftertouch.channel / aftertouch.poly（エンコード/デコード）
 
 ## リスク/ブロッカー
 - node-midi のネイティブビルドがOS/Nodeバージョンに依存
@@ -81,3 +84,4 @@
  - 方針決定: `node-midi` を採用し、@tonejs/midi と自作スケジューラでSMF再生を実装。クロスプラットフォーム（macOS/CoreMIDI, Windows/MME, Linux/ALSA）を目標。
  - R6着手: `play_smf` ツールを追加（@tonejs/midiでSMF解析→イベント生成）。dryRun対応、実再生はルックアヘッド型スケジューラ（未消音ノート管理）。`stop_playback` を強化（タイマ解除・全ノート消音・ポートクローズ）。
  - JSONファースト採用（ADR-0002）。JSON→SMF/SMF→JSON の双方向ツールをR7で実装予定。
+ - 変換メトリクス（bytes/trackCount/eventCount）を json_to_smf / smf_to_json の応答に追加しテストGREEN。READMEに観測ポイント/メトリクス解説とイベント対応一覧、MCP呼び出し例、ラウンドトリップ保証範囲を追記。
