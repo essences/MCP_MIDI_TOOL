@@ -178,6 +178,32 @@ play_smf（dryRun→実再生）:
 - 早期停止が見える場合は`get_playback_status`で進捗を確認し、スケジューラの窓/tickを調整
 - `stop_playback`は全ノート消音とポートクローズを行います（ハングノート対策）
 
+## ラウンドトリップ保証範囲（JSON⇄SMF）
+- ✅ 往復検証済み（テストGREEN）
+   - note / cc / pitchBend / program
+   - meta.tempo / meta.timeSignature / meta.marker / meta.trackName
+- 🔄 片方向対応
+   - meta.keySignature（エンコード可／デコードは今後対応予定）
+- ⭐ 実装予定（スキーマ定義済み）
+   - aftertouch.channel / aftertouch.poly
+
+## メトリクスの読み方（実務ガイド）
+- bytes
+   - ファイルサイズの概観。大きいほど読み込み・送出コスト増。数MB級はdryRunで絞り込み（startMs/stopMs）を検討。
+- trackCount
+   - トラックが多いほど並行イベントが増えがち。不要トラックは削除、役割が同じなら統合を検討。
+- eventCount
+   - スケジューラ負荷の目安。多い場合は`schedulerLookaheadMs`拡大・`schedulerTickMs`調整で安定化。
+- scheduledEvents（play_smf: dryRun）
+   - 実送出前の見積り。想定より多い場合はクオンタイズ/ベロシティの簡略化やCC間引きを検討。
+- totalDurationMs
+   - 再生時間の総尺。長尺では区間再生と進捗監視（get_playback_status）を併用。
+
+ヒント:
+- 初回は `dryRun:true` で scheduledEvents/totalDurationMs を把握 → 実再生へ
+- カクつき時は lookahead を広げ、tick をやや大きく（例: 200ms/20ms）
+- 受信側の負荷や内部モニタリングの有無も体感に影響します（DAWのメータ/可視化を一時オフに）
+
 ## FAQ / トラブルシューティング
 - node-midiのビルドに失敗します
    - Node.jsとOSの対応ビルドが必要です。Node 20+を推奨。再ビルド: `npm rebuild midi`。CI環境では`node-gyp`等のビルドツールが必要です。
