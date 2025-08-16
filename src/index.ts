@@ -56,7 +56,7 @@ async function main() {
         { name: "list_midi", description: "保存済みMIDIの一覧（ページング）", inputSchema: { type: "object", properties: { limit: { type: "number" }, offset: { type: "number" } } } },
         { name: "export_midi", description: "fileIdをdata/exportへコピー", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
         { name: "list_devices", description: "MIDI出力デバイス一覧（暫定）", inputSchema: { type: "object", properties: {} } },
-  { name: "play_smf", description: "SMFを解析し再生（dryRunで送出なし解析のみ）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" }, startMs: { type: "number" }, stopMs: { type: "number" }, dryRun: { type: "boolean" } }, required: ["fileId"] } },
+  { name: "play_smf", description: "SMFを解析し再生（dryRunで送出なし解析のみ）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" }, startMs: { type: "number" }, stopMs: { type: "number" }, dryRun: { type: "boolean" }, schedulerLookaheadMs: { type: "number" }, schedulerTickMs: { type: "number" } }, required: ["fileId"] } },
   { name: "get_playback_status", description: "再生ステータスを取得（進捗・総尺・デバイスなど）", inputSchema: { type: "object", properties: { playbackId: { type: "string" } }, required: ["playbackId"] } },
   { name: "playback_midi", description: "MIDI再生開始（PoC: durationMsで長さ指定可）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" }, durationMs: { type: "number" } }, required: ["fileId"] } },
         { name: "stop_playback", description: "playbackIdを停止", inputSchema: { type: "object", properties: { playbackId: { type: "string" } }, required: ["playbackId"] } },
@@ -129,7 +129,9 @@ async function main() {
       const fileId: string | undefined = args?.fileId;
       const startMs: number | undefined = Number.isFinite(Number(args?.startMs)) ? Number(args?.startMs) : undefined;
       const stopMs: number | undefined = Number.isFinite(Number(args?.stopMs)) ? Number(args?.stopMs) : undefined;
-      const dryRun: boolean = !!args?.dryRun;
+  const dryRun: boolean = !!args?.dryRun;
+  const schedulerLookaheadMs: number | undefined = Number.isFinite(Number(args?.schedulerLookaheadMs)) ? Math.max(10, Math.min(1000, Number(args?.schedulerLookaheadMs))) : undefined;
+  const schedulerTickMs: number | undefined = Number.isFinite(Number(args?.schedulerTickMs)) ? Math.max(5, Math.min(200, Number(args?.schedulerTickMs))) : undefined;
       if (!fileId) throw new Error("'fileId' is required for play_smf");
 
       let item: ItemRec | undefined = inMemoryIndex.get(fileId);
@@ -197,7 +199,7 @@ async function main() {
         startedAt: number;
         scheduledEvents: number;
         totalDurationMs: number;
-        intervalId: any;
+  intervalId: any;
         timeouts: any[];
         active: Set<string>;
         out?: any;
@@ -210,8 +212,8 @@ async function main() {
         portName?: string;
         done?: boolean;
       } = {
-        type: 'smf', fileId, startedAt: Date.now(), scheduledEvents, totalDurationMs, intervalId: null, timeouts: [], active: new Set(), out: undefined,
-        cursor: 0, lastSentIndex: -1, lastSentAt: 0, lookahead: 50, tickInterval: 10, portIndex: undefined, portName: undefined, done: false
+  type: 'smf', fileId, startedAt: Date.now(), scheduledEvents, totalDurationMs, intervalId: null, timeouts: [], active: new Set(), out: undefined,
+  cursor: 0, lastSentIndex: -1, lastSentAt: 0, lookahead: schedulerLookaheadMs ?? 50, tickInterval: schedulerTickMs ?? 10, portIndex: undefined, portName: undefined, done: false
       };
 
       // 出力デバイスを開く（macOS以外でもnode-midiがあれば開く）
