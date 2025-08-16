@@ -1,6 +1,6 @@
 # プロダクトバックログ - MCP MIDI TOOL
 
-更新日: 2025-08-16
+更新日: 2025-08-17
 
 凡例: [ ] 未着手 / [~] 進行中 / [x] 完了 / [!] ブロック
 
@@ -37,13 +37,20 @@
 - [ ] CIで各OSビルド・最小再生スモークを追加
 
 ## R6（実装: SMFプレイバック）
-- [ ] 依存導入: `midi`, `@tonejs/midi`
-- [ ] ツール追加: `play_smf { fileId, portName?, startMs?, stopMs? }`
-- [ ] 変換: SMF→イベント列（tMs付与・テンポ変化対応）
-- [ ] 送出: ルックアヘッド型スケジューラ（未消音ノート管理）
-- [ ] 停止: `stop_playback` で全ノート消音/タイマ解除
-- [ ] TDD: 固定テンポ/テンポ変化/停止/順序のテスト
-- [ ] スモーク: きらきら星SMFを store_midi→play_smf で再生
+- [x] 依存導入: `midi`, `@tonejs/midi`
+- [x] ツール追加: `play_smf { fileId, portName?, startMs?, stopMs?, dryRun?, schedulerLookaheadMs?, schedulerTickMs? }`
+- [x] 変換: SMF→イベント列（tMs付与・テンポ変化対応）
+- [x] 送出: ルックアヘッド型スケジューラ（未消音ノート管理）
+- [x] 停止: `stop_playback` で全ノート消音/タイマ解除
+- [~] TDD: 固定テンポ/テンポ変化/停止/順序のテスト（継続強化）
+- [x] スモーク: きらきら星/8秒継続SMFで store_midi→play_smf を再生
+
+## R7（JSONファースト: 作曲/編集）
+- [ ] 仕様: `docs/specs/json_midi_schema_v1.md`（Zod型・順序ルール）
+- [ ] ツール: `json_to_smf { json, name? }`（検証→コンパイル→保存）
+- [ ] ツール: `smf_to_json { fileId }`（解析→JSON化）
+- [ ] プロンプト: JSON生成→保存→dryRun→再生の手順書
+- [ ] テスト: ラウンドトリップ（JSON→SMF→JSON）と代表イベント
 
 ## リスク/ブロッカー
 - node-midi のネイティブビルドがOS/Nodeバージョンに依存
@@ -59,3 +66,4 @@
  - 再生ライブラリ調査を追加: `docs/research/midi_playback_libraries.md`（案A: midi+@tonejs/midi+自作スケジューラ / 案B: JZZ+jzz-midi-smf）。
  - 方針決定: `node-midi` を採用し、@tonejs/midi と自作スケジューラでSMF再生を実装。クロスプラットフォーム（macOS/CoreMIDI, Windows/MME, Linux/ALSA）を目標。
  - R6着手: `play_smf` ツールを追加（@tonejs/midiでSMF解析→イベント生成）。dryRun対応、実再生はルックアヘッド型スケジューラ（未消音ノート管理）。`stop_playback` を強化（タイマ解除・全ノート消音・ポートクローズ）。
+ - JSONファースト採用（ADR-0002）。JSON→SMF/SMF→JSON の双方向ツールをR7で実装予定。

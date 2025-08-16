@@ -6,6 +6,13 @@
 - I/O: [node-midi](https://www.npmjs.com/package/midi)（RtMidi）を動的に使用（利用不可環境ではサイレントフォールバック）
 - SMF解析: [@tonejs/midi](https://www.npmjs.com/package/@tonejs/midi)
 
+## JSONファースト（作曲/編集フロー）
+AIとの連携では、長大なBase64よりも「構造化JSON→SMFコンパイル」の方が堅牢で反復編集に適します（ADR-0002）。今後、以下のツールを追加予定です。
+- json_to_smf: JSONを検証してSMFへコンパイルし保存
+- smf_to_json: 既存SMFをJSONへデコンパイル
+
+JSONスキーマ（最小案）や順序ルール、検証方針は `docs/adr/ADR-0002-json-first-composition.md` を参照してください。既存のSMFワークフロー（store_midi→play_smf）はそのまま利用できます。
+
 ## 主な機能（MCP Tools）
 - store_midi: base64のMIDIを保存し、fileIdを返す
 - get_midi: メタ情報を返し、任意でbase64を同梱
@@ -41,6 +48,7 @@
 - 単音スモーク＆基本操作: `docs/prompts/claude_test_prompts_v2.md`
 - SMF再生（dryRun→実再生→停止）: `docs/prompts/claude_test_prompts_v3_play_smf.md`
 - 8秒の継続音SMFでE2E検証: `docs/prompts/claude_test_prompts_v4_continuous_8s.md`
+- ネットDL→Bach 3声インベンション実再生: `docs/prompts/claude_test_prompts_v5_bach_3voice_net.md`
 - 8秒SMFの生成スニペット: `docs/snippets/continuous_chords_smf_8s.md`
 
 最短確認（例）:
@@ -66,6 +74,7 @@
 - 目標: macOS(CoreMIDI) / Windows(MME) / Linux(ALSA)
 - 依存: node-midi のネイティブビルドに依存（OS/Nodeバージョン注意）
 - ADR: `docs/adr/ADR-0001-node-midi-adoption.md`
+   - 追加: `docs/adr/ADR-0002-json-first-composition.md`
 
 ## 開発
 - TDDで進行。Vitestなどでユニット/結合テスト（`npm test`）
