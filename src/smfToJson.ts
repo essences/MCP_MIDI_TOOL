@@ -22,6 +22,52 @@ export async function decodeSmfToJson(buf: Uint8Array | Buffer): Promise<JsonMid
     const denominator = Number(arr?.[1]) || 4;
     return { type: "meta.timeSignature" as const, tick, numerator, denominator };
   });
+  // Key Signature events from header (fallback to per-track if header missing)
+  const KEY_TO_SF_MAJOR: Record<string, number> = {
+    "Cb": -7, "Gb": -6, "Db": -5, "Ab": -4, "Eb": -3, "Bb": -2, "F": -1,
+    "C": 0, "G": 1, "D": 2, "A": 3, "E": 4, "B": 5, "F#": 6, "C#": 7,
+  };
+  const KEY_TO_SF_MINOR: Record<string, number> = {
+    "Ab": -7, "Eb": -6, "Bb": -5, "F": -4, "C": -3, "G": -2, "D": -1,
+    "A": 0, "E": 1, "B": 2, "F#": 3, "C#": 4, "G#": 5, "D#": 6, "A#": 7,
+  };
+  function normKey(k: any): string | undefined {
+    if (!k) return undefined;
+    const s = String(k).trim();
+    // Normalize casing: first letter upper, rest as-is to preserve #/b
+    return s.length ? (s[0].toUpperCase() + s.slice(1)) : undefined;
+  }
+  const headerKS = (midi.header?.keySignatures || []).map((ks: any) => {
+    const tick = Number(ks.ticks) || 0;
+    const key = normKey(ks.key);
+    const scale = String(ks.scale || ks.mode || "major").toLowerCase();
+    const mi = scale === "minor" ? 1 : 0;
+    // Some implementations may provide sf directly
+    let sf: number | undefined = Number.isFinite(Number((ks as any).sf)) ? Number((ks as any).sf) : undefined;
+    if (!Number.isFinite(sf as number)) {
+      const map = mi ? KEY_TO_SF_MINOR : KEY_TO_SF_MAJOR;
+      sf = key && key in map ? map[key] : 0;
+    }
+    sf = Math.max(-7, Math.min(7, Math.round(sf!)));
+    return { type: "meta.keySignature" as const, tick, sf, mi };
+  });
+  // Fallback search on tracks if header empty
+  const trackKS = headerKS.length > 0 ? [] : ([] as any[]).concat(
+    ...midi.tracks.map((tr: any) => (tr.keySignatures || []).map((ks: any) => {
+      const tick = Number(ks.ticks) || 0;
+      const key = normKey(ks.key);
+      const scale = String(ks.scale || ks.mode || "major").toLowerCase();
+      const mi = scale === "minor" ? 1 : 0;
+      let sf: number | undefined = Number.isFinite(Number((ks as any).sf)) ? Number((ks as any).sf) : undefined;
+      if (!Number.isFinite(sf as number)) {
+        const map = mi ? KEY_TO_SF_MINOR : KEY_TO_SF_MAJOR;
+        sf = key && key in map ? map[key] : 0;
+      }
+      sf = Math.max(-7, Math.min(7, Math.round(sf!)));
+      return { type: "meta.keySignature" as const, tick, sf, mi };
+    }))
+  );
+  const ksEvents = headerKS.length > 0 ? headerKS : trackKS;
 
   const tracks = midi.tracks.map((tr: any) => {
     const name: string | undefined = tr.name || undefined;
@@ -88,12 +134,12 @@ export async function decodeSmfToJson(buf: Uint8Array | Buffer): Promise<JsonMid
     return { name, channel, events };
   });
 
-  // Prepend tempo/timeSignature events into first track if exists; else create one
-  if (tempoEvents.length > 0 || tsEvents.length > 0) {
+  // Prepend tempo/timeSignature/keySignature events into first track if exists; else create one
+  if (tempoEvents.length > 0 || tsEvents.length > 0 || ksEvents.length > 0) {
     if (tracks.length === 0) {
-      tracks.push({ name: undefined, channel: undefined, events: [...tempoEvents, ...tsEvents] });
+      tracks.push({ name: undefined, channel: undefined, events: [...tempoEvents, ...tsEvents, ...ksEvents] });
     } else {
-      tracks[0]!.events.unshift(...tempoEvents, ...tsEvents);
+      tracks[0]!.events.unshift(...tempoEvents, ...tsEvents, ...ksEvents);
       tracks[0]!.events.sort((a: any, b: any) => a.tick - b.tick);
     }
   }
