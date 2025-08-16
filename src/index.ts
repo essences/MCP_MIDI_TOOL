@@ -9,8 +9,10 @@ let MidiOutput: any = null;
 async function loadMidi() {
   if (MidiOutput) return MidiOutput;
   try {
-    const midi = await import('midi');
-    MidiOutput = midi.Output;
+    const mod: any = await import('midi');
+    // ESM/CJS どちらの形でも Output を解決
+    const Out = mod?.Output || mod?.default?.Output;
+    MidiOutput = typeof Out === 'function' ? Out : null;
   } catch {
     MidiOutput = null;
   }
