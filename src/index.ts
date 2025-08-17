@@ -410,7 +410,22 @@ async function main() {
           const s = startMs ?? 0;
           const e = stopMs ?? Number.POSITIVE_INFINITY;
           events = events.filter(ev => ev.tMs >= s && ev.tMs <= e);
-          // 先頭がNoteOffのみにならないようにする処理は今回は省略（受信側が安定）
+          // クリップにより NoteOn が残り NoteOff が失われるケースに対応: 欠落Offを合成
+          const lastBoundary = Number.isFinite(e) ? e : (events.length ? events[events.length-1]!.tMs : s);
+          const onMap = new Map<string, Ev>();
+          const synthOff: Ev[] = [];
+          for (const ev of events) {
+            const key = `${ev.ch}:${ev.n}`;
+            if (ev.kind === 'on') onMap.set(key, ev);
+            else onMap.delete(key);
+          }
+          for (const [key, onEv] of onMap) {
+            synthOff.push({ tMs: Math.max(onEv.tMs + 5, lastBoundary), kind: 'off', ch: onEv.ch, n: onEv.n, v: 0 });
+          }
+          if (synthOff.length) {
+            events.push(...synthOff);
+            events.sort((a,b)=> a.tMs - b.tMs || (a.kind==='off'? -1: 1));
+          }
         }
         scheduledEvents = events.length;
         if (events.length > 0) {
@@ -517,10 +532,42 @@ async function main() {
           cursor++;
         }
     state.cursor = cursor;
-    if (cursor >= events.length) {
-          clearInterval(intervalId);
-      state.done = true;
-        }
+      if (cursor >= events.length) {
+            clearInterval(intervalId);
+            // 再生完了時の安全フラッシュ: CC64=0, CC123, 残留ノートのvel0 Off、ポートクローズ
+            try {
+              if (state.out) {
+                const chSet = new Set<number>();
+                for (const ev of events) chSet.add((ev.ch|0) & 0x0f);
+                for (const ch of chSet) {
+                  // CC64 (Sustain) OFF
+                  try { state.out.sendMessage([0xB0 | ch, 64, 0]); } catch {}
+                }
+                // 残留ノートがあれば個別にOff
+                if (state.active && state.active.size) {
+                  try {
+                    const chSet2 = new Set<number>();
+                    for (const key of Array.from(state.active)) {
+                      const [chStr, nStr] = String(key).split(":");
+                      const ch = (Number(chStr)|0) & 0x0f; const n = Number(nStr)|0;
+                      chSet2.add(ch);
+                      try { state.out.sendMessage([0x90 | ch, n & 0x7f, 0]); } catch {}
+                    }
+                    // CC123 All Notes Off
+                    for (const ch of chSet2) { try { state.out.sendMessage([0xB0 | ch, 123, 0]); } catch {} }
+                    state.active.clear();
+                  } catch {}
+                } else {
+                  // active が空でも CC123 を送っておく（保険）
+                  try {
+                    for (const ch of chSet) { try { state.out.sendMessage([0xB0 | ch, 123, 0]); } catch {} }
+                  } catch {}
+                }
+                try { state.out.closePort(); } catch {}
+              }
+            } catch {}
+        state.done = true;
+          }
       }, tickInterval);
       state.intervalId = intervalId;
 
