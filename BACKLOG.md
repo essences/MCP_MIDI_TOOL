@@ -70,6 +70,14 @@
  - [x] JSON入力: ノート音名 `note: "C4"` 等の受け付け（エンコード時にMIDI番号へ変換、デコード時は `pitch` と `note` を併記）
 - [ ] イベント拡充: aftertouch.channel / aftertouch.poly（エンコード/デコード）
 
+## R8（音楽記法レイヤー: Score DSL v1）
+- [ ] 仕様: `docs/specs/score_dsl_v1.md`（小節/拍/音価/アーティキュレーション/拍子・キー/テンポ）
+- [ ] スキーマ: `src/scoreSchema.ts`（Zod: Position/DurationSpec/Articulation 等）
+- [ ] 変換: `src/scoreToJsonMidi.ts`（Position/Duration→tick, articulation/dynamic/tie/slur マッピング）
+- [ ] ツール: `score_to_smf { score, name? }` または `json_to_smf` の union対応（scoreV1受理）
+- [ ] テスト: 音価（付点/連符/スウィング無）・アーティキュレーション（staccato/legato/tenuto/accent）・tie/slur・メタ（timeSig/keySig/tempo）
+- [ ] ドキュメント: README 追記と `docs/prompts/claude_test_prompts_v8_score_dsl.md` 追加
+
 ## リスク/ブロッカー
 - node-midi のネイティブビルドがOS/Nodeバージョンに依存
 - 大容量MIDIの処理時間
