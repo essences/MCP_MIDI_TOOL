@@ -37,9 +37,6 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
 
 人間に読み書きしやすい記法でJSONを組み立て、内部でJSON MIDI v1（tick/ppq）へコンパイルしてからSMFに変換します。
 
-- 受理: `json_to_smf` は JSON MIDI v1 と Score DSL v1 の両方を受け付けます（Score DSLは内部でコンパイル）。
-- 記述: 小節(bar)/拍(beat)/音価(value: 1/4, 1/8, 付点, 連符)、アーティキュレーション(staccato/legato/tenuto/accent/marcato)、tie/slur、拍子/キー/テンポをサポート。
-- 例:
 ```json
 {
    "ppq": 480,
@@ -56,6 +53,9 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
    ]
 }
 ```
+注意点（よくある質問）
+- `start.beat` は整数（小数不可）。半拍や3連位置は `unit`/`offset` で表現します。
+- `articulation` の許容は `staccato|tenuto|legato|accent|marcato`。`diminuendo` は未対応（`velocity`/`cc`で代替）。
 
 詳細は `docs/specs/score_dsl_v1.md` を参照。
 ### 対応イベント一覧（現状）

@@ -43,3 +43,8 @@ T-5) 異常系（入力バリデーション）: { notes:["H4"], dryRun:true } �
 - 実送出はポートがある場合のみ。まずは dryRun で件数/所要ミリ秒を確認してから実送出してください。
 - `notes` は音名（例: C4, F#3, Bb5）または数値（0..127）の配列で渡せます。`transpose` で半音単位の移調が可能です。
 - program を指定すると、発音前に Program Change を1回送出します。
+
+### Score DSL 連携時の注意（共通）
+- Score DSLでは `start.beat` は整数です（小数は不可）。半拍や3連位置は `unit`/`offset` を用いて表現してください。
+  - 例: 2.5拍 → `{"start": { "bar": 1, "beat": 2, "unit": 2, "offset": 1 }}`
+- `articulation` に `diminuendo` は未対応です。段階的な `velocity` 変化、または `cc` イベントで代替してください。
