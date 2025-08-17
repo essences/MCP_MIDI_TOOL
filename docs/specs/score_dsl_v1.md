@@ -198,6 +198,32 @@ Score DSL（入力）:
 
 ---
 
+## サーバへの渡し方（json_to_smf / format指定推奨）
+
+Score DSL v1 を MCP ツール `json_to_smf` に渡す際は、`format: "score_dsl_v1"` を明示してください（厳密分岐）。
+
+例（オブジェクトで渡す場合）:
+```jsonc
+{
+  "tool": "json_to_smf",
+  "arguments": {
+    "json": {
+      "ppq": 480,
+      "meta": { "timeSignature": { "numerator": 4, "denominator": 4 }, "tempo": { "bpm": 120 } },
+      "tracks": [ { "channel": 1, "events": [ { "type": "note", "note": "C4", "start": { "bar": 1, "beat": 1 }, "duration": { "value": "1/4" } } ] } ]
+    },
+    "format": "score_dsl_v1",
+    "name": "from-dsl.mid"
+  }
+}
+```
+
+備考:
+- `json` は JSON 文字列として渡しても構いません（内部で JSON.parse を試みます）。
+- `format` 未指定時は後方互換のため「JSON MIDI v1 検証→失敗なら Score DSL v1 コンパイル」に自動フォールバックしますが、誤検出回避のため `format` の明示を推奨します。
+
+---
+
 ## 拡張余地
 - ダイナミクス記号→ベロシティ曲線（クレッシェンド/デクレッシェンド）
 - 表現記号→CC（サステイン/モジュレーション）自動付与のプリセット
