@@ -33,6 +33,31 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
 }
 ```
 
+## Score DSL v1（小節/拍/音価/アーティキュレーション）
+
+人間に読み書きしやすい記法でJSONを組み立て、内部でJSON MIDI v1（tick/ppq）へコンパイルしてからSMFに変換します。
+
+- 受理: `json_to_smf` は JSON MIDI v1 と Score DSL v1 の両方を受け付けます（Score DSLは内部でコンパイル）。
+- 記述: 小節(bar)/拍(beat)/音価(value: 1/4, 1/8, 付点, 連符)、アーティキュレーション(staccato/legato/tenuto/accent/marcato)、tie/slur、拍子/キー/テンポをサポート。
+- 例:
+```json
+{
+   "ppq": 480,
+   "meta": {
+      "timeSignature": { "numerator": 4, "denominator": 4 },
+      "keySignature": { "root": "C", "mode": "major" },
+      "tempo": { "bpm": 120 }
+   },
+   "tracks": [
+      { "channel": 0, "program": 0, "events": [
+         { "type": "note", "note": "C4", "start": { "bar":1, "beat":1 }, "duration": { "value": "1/4" }, "articulation": "staccato" },
+         { "type": "note", "note": "D4", "start": { "bar":1, "beat":2 }, "duration": { "value": "1/8", "dots": 1 }, "articulation": "accent" }
+      ]}
+   ]
+}
+```
+
+詳細は `docs/specs/score_dsl_v1.md` を参照。
 ### 対応イベント一覧（現状）
 - ノート: note（ON/OFF、velocity、durationTicks）
    - ピッチ指定は2通り: `pitch`(0..127) または `note`(音名: C4, F#3, Bb5 等)。SMF→JSONでは両方が付与されます。
