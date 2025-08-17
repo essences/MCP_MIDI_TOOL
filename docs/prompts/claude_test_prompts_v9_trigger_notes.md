@@ -25,7 +25,7 @@ T-3) 和音・ドライラン（数値+transpose）: { notes:[60,64,67], transpo
 
 T-4) 実送出（デバイスがある場合のみ）:
   1) list_devices で候補取得。IAC/Network/Virtual を優先、無ければ先頭を選択。
-  2) trigger_notes を実行: { notes:["C4","E4","G4"], velocity:100, durationMs:250, channel:0, program:0, portName:"<選択名>" }
+  2) trigger_notes を実行: { notes:["C4","E4","G4"], velocity:100, durationMs:250, channel:1, program:0, portName:"<選択名>" }
   3) 直後に get_playback_status（playbackId指定）→ 0.3秒待機 → stop_playback。
   - 期待: playbackId取得、get_playback_statusで進捗とdoneが確認できる。
 
@@ -43,6 +43,9 @@ T-5) 異常系（入力バリデーション）: { notes:["H4"], dryRun:true } �
 - 実送出はポートがある場合のみ。まずは dryRun で件数/所要ミリ秒を確認してから実送出してください。
 - `notes` は音名（例: C4, F#3, Bb5）または数値（0..127）の配列で渡せます。`transpose` で半音単位の移調が可能です。
 - program を指定すると、発音前に Program Change を1回送出します。
+
+チャンネル表記（重要）
+- trigger_notes の channel は外部表記 1〜16 で指定してください（例: ch1 は 1）。内部実装では 0〜15 に変換されます。
 
 ### Score DSL 連携時の注意（共通）
 - Score DSLでは `start.beat` は整数です（小数は不可）。半拍や3連位置は `unit`/`offset` を用いて表現してください。

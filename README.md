@@ -33,6 +33,10 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
 }
 ```
 
+注意（チャンネル表記について）
+- 上記は内部の JSON MIDI v1 例です。チャンネルは内部値 0〜15（ch1=0）で表されます。
+- MCPツールの引数や Score DSL など、外部からチャンネルを指定する場合は 1〜16 で指定してください（本ドキュメントではこの外部表記を基本とします）。
+
 ## Score DSL v1（小節/拍/音価/アーティキュレーション）
 
 人間に読み書きしやすい記法でJSONを組み立て、内部でJSON MIDI v1（tick/ppq）へコンパイルしてからSMFに変換します。
@@ -46,7 +50,7 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
       "tempo": { "bpm": 120 }
    },
    "tracks": [
-      { "channel": 0, "program": 0, "events": [
+   { "channel": 1, "program": 0, "events": [
          { "type": "note", "note": "C4", "start": { "bar":1, "beat":1 }, "duration": { "value": "1/4" }, "articulation": "staccato" },
          { "type": "note", "note": "D4", "start": { "bar":1, "beat":2 }, "duration": { "value": "1/8", "dots": 1 }, "articulation": "accent" }
       ]}
@@ -100,7 +104,7 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
 - get_playback_status
    - 出力: `{ playbackId, done, cursorMs, lastSentAt, totalDurationMs }`
 - trigger_notes（単発発音・即時）
-   - 入力: `{ notes: (string[]|number[]), velocity?: number(1-127)=100, durationMs?: number(20-10000)=500, channel?: number(0-15)=0, program?: number(0-127), portName?: string, transpose?: number, dryRun?: boolean }`
+   - 入力: `{ notes: (string[]|number[]), velocity?: number(1-127)=100, durationMs?: number(20-10000)=500, channel?: number(1-16)=1, program?: number(0-127), portName?: string, transpose?: number, dryRun?: boolean }`（外部表記。内部では 0〜15 にマップ）
    - 出力: `{ playbackId, scheduledNotes, durationMs, portName? }`（dryRun時は即done相当）
    - 例: `{ tool:"trigger_notes", arguments:{ notes:["C4","E4","G4"], velocity:96, durationMs:200, portName:"IAC" } }`
 
@@ -119,6 +123,7 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
 以下はMCPクライアントが送るpayloadの概略です（実際はクライアント実装に依存）。
 
 json_to_smf:
+（内部 JSON MIDI の例。チャンネルは 0〜15（ch1=0）で表現されます。外部指定は 1〜16 を使用してください）
 ```jsonc
 {
    "tool": "json_to_smf",
@@ -185,7 +190,7 @@ play_smf（dryRun→実再生）:
 ## 受信側（音が出ない時）
 - macOSの例: `docs/setup/macos_coremidi_receiver.md`
 - チェックリスト: `docs/checklists/receiver_setup_checklist.md`
-- 確認ポイント: トラック入力 / モニタリング / 音源割当 / MIDIチャンネル（通常ch1=0）
+- 確認ポイント: トラック入力 / モニタリング / 音源割当 / MIDIチャンネル（通常は ch1。内部値では 0）
 
 ## クロスプラットフォーム
 - 目標: macOS(CoreMIDI) / Windows(MME) / Linux(ALSA)
@@ -242,7 +247,7 @@ play_smf（dryRun→実再生）:
 - 出力ポートが見つかりません
    - `list_devices`でポート名を確認し、`portName`に部分一致/正確な名称を指定。macOSではIAC Driverを有効化してください。
 - 再生しても音が出ません
-   - 受信アプリ/音源のMIDIインプット接続、チャンネル（デフォルトch1=0）、音源割当、モニタリングを確認。まず`dryRun:true`でイベント検出を確認。
+   - 受信アプリ/音源のMIDIインプット接続、チャンネル（デフォルトは ch1。内部値では 0）、音源割当、モニタリングを確認。まず`dryRun:true`でイベント検出を確認。
 - 再生がカクつく/遅延します
    - `schedulerLookaheadMs`を広げ、`schedulerTickMs`をやや大きく。CPU負荷が高いとタイマ精度が落ちるため、他の重い処理を避けて検証。
 - ハングノートが発生します

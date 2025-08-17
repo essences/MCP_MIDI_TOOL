@@ -30,6 +30,11 @@
 共通エラー: { error: true, code: string, message: string, details?: any }
 サイズ上限: 10MB
 
+チャンネル表記（重要・AI向け注意）:
+- 外部からの指定は「1〜16」で表現してください（人間の一般表記）。
+- 本サーバ内の低レイヤでは「0〜15」を使用します（ch1→0に相当）。
+- 仕様やプロンプトの記述では常に「ch1〜ch16」を用い、0というチャンネル番号を示唆しないでください。（AIが誤って0を選ばないように明記）
+
 - store_midi
   - inputs: { base64?: string; path?: string; name?: string; overwrite?: boolean }
   - outputs: { fileId: string; path: string; bytes: number; createdAt: string }

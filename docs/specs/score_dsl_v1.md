@@ -21,7 +21,7 @@
 
 Track:
 - `name?`: string
-- `channel?`: 0-15（デフォルト0）
+- `channel?`: 1-16（外部表記。内部では0-15にマップ／デフォルトは1=ch1）
 - `program?`: 0-127（GM音色）
 - `events`: Array<NoteEvent | ControlEvent | MarkerEvent>
 
@@ -97,6 +97,11 @@ RationalValue: { `numerator`: number, `denominator`: number }（正確な有理�
 6) 安定性・順序
 - 既存エンコーダの順序規則（meta→program/cc→notes）に合流。tick/チャンネル/種別で安定ソート。
 
+補足（チャンネル表記の原則）
+- Score DSLではチャンネルは1〜16で指定します（例: ch1は1）。
+- 内部処理/SMFでは0〜15を用いるため、入出力時に相互変換します。
+- 仕様・プロンプト・サンプルで“0”というチャンネル指定は使用しません（AIが0を誤って選ばないように）。
+
 ---
 
 ## エラーモデル（簡易）
@@ -151,7 +156,7 @@ Score DSL（入力）:
   "tracks": [
     {
       "name": "Lead",
-      "channel": 0,
+  "channel": 1,
       "program": 0,
       "events": [
         { "type": "note", "note": "C4", "start": { "bar": 1, "beat": 1 }, "duration": { "value": "1/4" }, "articulation": "staccato" },

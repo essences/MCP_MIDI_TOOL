@@ -32,6 +32,7 @@
   - name?: 文字列
   - channel?: 0..15（省略時はイベント側のchannelを必須とするか、トラックchannelを既定にする方針のどちらか。v1は「イベント側優先、なければtrack.channel」を許容）
   - events: Event[]
+  - 注意（外部表記との対応）: 外部からチャンネルを指定するAPI/DSLでは 1〜16 を使用し、内部JSONでは 0..15 に正規化します（ch1→0）。ドキュメントやプロンプトでは“0”というチャンネル番号を推奨しません。
 - Event（代表）
   - note: { type:"note", tick, pitch(0..127), velocity(1..127), duration(>=1), channel? }
   - cc: { type:"cc", tick, controller(0..127), value(0..127), channel? }
