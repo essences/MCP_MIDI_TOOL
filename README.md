@@ -93,7 +93,9 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
 
 ### ツール詳細（入出力の要点）
 - json_to_smf
-   - 入力: `{ json: <JSON MIDI または Score DSL v1>, name?: string, overwrite?: boolean }`（Score DSLはオブジェクト/JSON文字列いずれも可。内部でJSON MIDI v1へコンパイル）
+   - 入力: `{ json: <JSON MIDI または Score DSL v1>, format?: "json_midi_v1"|"score_dsl_v1", name?: string, overwrite?: boolean }`
+      - format を明示すると、その形式で厳密に処理します（推奨）。
+      - 未指定の場合は後方互換として「JSON MIDI v1の検証→失敗ならScore DSL v1のコンパイル」へフォールバックします。
    - 出力: `{ fileId, bytes, trackCount, eventCount }`
 - smf_to_json
    - 入力: `{ fileId }`
@@ -128,9 +130,26 @@ json_to_smf:
 {
    "tool": "json_to_smf",
    "arguments": {
-   "json": { "ppq":480, "tracks":[ {"events":[{"type":"meta.tempo","tick":0,"usPerQuarter":500000}]}, {"channel":0,"events":[{"type":"program","tick":0,"program":0},{"type":"note","tick":0,"pitch":60,"velocity":100,"duration":960}]} ] },
+    "json": { "ppq":480, "tracks":[ {"events":[{"type":"meta.tempo","tick":0,"usPerQuarter":500000}]}, {"channel":0,"events":[{"type":"program","tick":0,"program":0},{"type":"note","tick":0,"pitch":60,"velocity":100,"duration":960}]} ] },
+         "format": "json_midi_v1",
       "name": "example.json",
       "overwrite": true
+   }
+}
+```
+
+Score DSL を直接渡す例（オブジェクト or JSON文字列のどちらでも可）:
+```jsonc
+{
+   "tool": "json_to_smf",
+   "arguments": {
+      "json": {
+         "ppq": 480,
+         "meta": { "timeSignature": { "numerator": 4, "denominator": 4 }, "tempo": { "bpm": 120 } },
+         "tracks": [ { "channel": 1, "events": [ { "type": "note", "note": "C4", "start": { "bar": 1, "beat": 1 }, "duration": { "value": "1/4" } } ] } ]
+      },
+      "format": "score_dsl_v1",
+      "name": "from-dsl.mid"
    }
 }
 ```
@@ -211,10 +230,13 @@ play_smf（dryRun→実再生）:
 これらはクライアント側のログやガードレール（過大サイズ回避）に活用できます。
 
 ## 既知の制限/注意
-### Score DSL を json_to_smf に渡したときのエラーの読み方
-- `tick: Required` や `duration: Expected number` は「まず JSON MIDI v1 として検証して失敗した」ことを示す一次エラーです。
-- フォールバックで Score DSL v1 としてコンパイルを試み、失敗した場合は `score-compile: ...` という追補がメッセージに含まれます。
-- 例: `json validation failed (or score compile failed): tick: Required | score-compile: duration.value: Invalid input` のように、両方の観点が連結されます。
+### Score DSL / JSON MIDI のエラーの読み方（format導入後）
+- `format` を指定した場合:
+   - `format: "json_midi_v1"` では `json_midi_v1 validation failed: ...` の形でZodの検証エラーが返ります。
+   - `format: "score_dsl_v1"` では `score_dsl_v1 compile/validation failed: ...` の形でコンパイル/検証エラーが返ります。
+- `format` 未指定の場合（後方互換）:
+   - まず JSON MIDI v1 として検証し、失敗時は Score DSL v1 のコンパイルを試みます。
+   - その場合のメッセージは `json validation failed (or score compile failed): ... | score-compile: ...` のように連結されます。
 - Score DSLの値（特に NotationValue）は `"1" | "1/2" | "1/4" | "1/8" | "1/16" | "1/32"` を使用してください（`"1/1"`は無効）。
 - 大容量SMFはdryRunで件数や総尺を把握し、範囲再生（startMs/stopMs）を推奨
 - 早期停止が見える場合は`get_playback_status`で進捗を確認し、スケジューラの窓/tickを調整

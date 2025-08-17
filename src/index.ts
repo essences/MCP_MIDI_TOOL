@@ -55,8 +55,8 @@ async function main() {
     // Claude Desktop からの tools/list / resources/list / prompts/list への応答
     if (request.method === "tools/list") {
       const tools: any[] = [
-        { name: "store_midi", description: "base64のMIDIを保存し、fileIdを返す", inputSchema: { type: "object", properties: { base64: { type: "string" }, name: { type: "string" } }, required: ["base64"] } },
-  { name: "json_to_smf", description: "JSON曲データをSMFにコンパイルし保存", inputSchema: { type: "object", properties: { json: { type: "object" }, name: { type: "string" } , overwrite: { type: "boolean" } }, required: ["json"] } },
+    { name: "store_midi", description: "base64のMIDIを保存し、fileIdを返す", inputSchema: { type: "object", properties: { base64: { type: "string" }, name: { type: "string" } }, required: ["base64"] } },
+  { name: "json_to_smf", description: "JSON曲データをSMFにコンパイルし保存", inputSchema: { type: "object", properties: { json: { anyOf: [ { type: "object" }, { type: "string" } ] }, format: { type: "string", enum: ["json_midi_v1", "score_dsl_v1"] }, name: { type: "string" } , overwrite: { type: "boolean" } }, required: ["json"] } },
   { name: "smf_to_json", description: "SMFを解析してJSON曲データに変換", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
         { name: "get_midi", description: "fileIdでMIDIメタ情報と任意でbase64を返す", inputSchema: { type: "object", properties: { fileId: { type: "string" }, includeBase64: { type: "boolean" } }, required: ["fileId"] } },
         { name: "list_midi", description: "保存済みMIDIの一覧（ページング）", inputSchema: { type: "object", properties: { limit: { type: "number" }, offset: { type: "number" } } } },
@@ -280,39 +280,58 @@ async function main() {
   return wrap({ ok: true, fileId, path: relPath, bytes, createdAt }) as any;
     }
 
-    // json_to_smf: validate JSON via zod, compile to SMF, save, update manifest
+    // json_to_smf: validate/compile based on explicit format (if provided), then SMF保存
     if (name === "json_to_smf") {
       let json = args?.json;
+      const format: string | undefined = typeof args?.format === 'string' ? String(args.format) : undefined;
       if (typeof json === 'string') {
-        try { json = JSON.parse(json); } catch { /* ignore, will fail validation below */ }
+        // 文字列で来た場合はまずJSON.parseを試みる（どちらのフォーマットでもJSONである想定）
+        try { json = JSON.parse(json); } catch { /* 後続のバリデーションで明示エラー */ }
       }
       const fileNameInput: string | undefined = args?.name;
       if (!json) throw new Error("'json' is required for json_to_smf");
-
-      // JSON MIDI v1としての検証に失敗した場合、Score DSL v1とみなしてコンパイル→再検証
+      
       let song: any;
-      const parsed = zSong.safeParse(json);
-      if (parsed.success) {
-        song = parsed.data;
-      } else {
-        let compileErrMsg = "";
+      if (format === 'json_midi_v1') {
+        // 明示: JSON MIDI v1 として検証
+        try {
+          song = zSong.parse(json);
+        } catch (e: any) {
+          const issues = e?.issues?.map?.((i: any)=> `${i.path?.join?.('.')}: ${i.message}`).join('; ');
+          throw new Error(`json_midi_v1 validation failed: ${issues || e?.message || String(e)}`);
+        }
+      } else if (format === 'score_dsl_v1') {
+        // 明示: Score DSL v1 をコンパイル→検証
         try {
           const compiled = compileScoreToJsonMidi(json);
-          try {
-            song = zSong.parse(compiled);
-          } catch (e2: any) {
-            // コンパイル結果のJSON MIDI検証エラー
-            const z2 = e2?.issues?.map?.((i: any) => `${i.path?.join?.('.')}: ${i.message}`).join('; ');
-            compileErrMsg = `compiled-json-invalid: ${z2 || e2?.message || String(e2)}`;
-            throw e2;
-          }
+          song = zSong.parse(compiled);
         } catch (e: any) {
-          // 元JSON MIDIのバリデーションエラー
-          const issues = parsed.error.issues?.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
-          const baseMsg = issues || parsed.error?.message || "invalid json";
-          const extra = compileErrMsg || e?.issues?.map?.((i: any)=> `${i.path?.join?.('.')}: ${i.message}`).join('; ') || e?.message || String(e);
-          const msg = `${baseMsg}${extra ? ` | score-compile: ${extra}` : ''}`;
-          throw new Error(`json validation failed (or score compile failed): ${msg}`);
+          const issues = e?.issues?.map?.((i: any)=> `${i.path?.join?.('.')}: ${i.message}`).join('; ');
+          throw new Error(`score_dsl_v1 compile/validation failed: ${issues || e?.message || String(e)}`);
+        }
+      } else {
+        // 後方互換: まずJSON MIDI v1として検証→失敗ならScore DSL v1としてコンパイルを試行
+        const parsed = zSong.safeParse(json);
+        if (parsed.success) {
+          song = parsed.data;
+        } else {
+          let compileErrMsg = "";
+          try {
+            const compiled = compileScoreToJsonMidi(json);
+            try {
+              song = zSong.parse(compiled);
+            } catch (e2: any) {
+              const z2 = e2?.issues?.map?.((i: any) => `${i.path?.join?.('.')}: ${i.message}`).join('; ');
+              compileErrMsg = `compiled-json-invalid: ${z2 || e2?.message || String(e2)}`;
+              throw e2;
+            }
+          } catch (e: any) {
+            const issues = parsed.error.issues?.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
+            const baseMsg = issues || parsed.error?.message || "invalid json";
+            const extra = compileErrMsg || e?.issues?.map?.((i: any)=> `${i.path?.join?.('.')}: ${i.message}`).join('; ') || e?.message || String(e);
+            const msg = `${baseMsg}${extra ? ` | score-compile: ${extra}` : ''}`;
+            throw new Error(`json validation failed (or score compile failed): ${msg}`);
+          }
         }
       }
       const bin = encodeToSmfBinary(song);
