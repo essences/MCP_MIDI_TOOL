@@ -7,6 +7,7 @@ import { appendItem, getItemById, readManifest, resolveMidiDir, resolveExportDir
 import { zSong } from "./jsonSchema.js";
 import { encodeToSmfBinary } from "./jsonToSmf.js";
 import { decodeSmfToJson } from "./smfToJson.js";
+import { compileScoreToJsonMidi } from "./scoreToJsonMidi.js";
 // CoreMIDI (node-midi) は動的 import（macOS以外やCIでの存在を許容）
 let MidiOutput: any = null;
 async function loadMidi() {
@@ -135,13 +136,21 @@ async function main() {
       const fileNameInput: string | undefined = args?.name;
       if (!json) throw new Error("'json' is required for json_to_smf");
 
+      // JSON MIDI v1としての検証に失敗した場合、Score DSL v1とみなしてコンパイル→再検証
+      let song: any;
       const parsed = zSong.safeParse(json);
-      if (!parsed.success) {
-        const issues = parsed.error.issues?.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
-        throw new Error(`json validation failed: ${issues || parsed.error.message}`);
+      if (parsed.success) {
+        song = parsed.data;
+      } else {
+        try {
+          const compiled = compileScoreToJsonMidi(json);
+          song = zSong.parse(compiled);
+        } catch (e: any) {
+          const issues = parsed.error.issues?.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
+          const msg = issues || parsed.error?.message || e?.message || String(e);
+          throw new Error(`json validation failed (or score compile failed): ${msg}`);
+        }
       }
-
-  const song = parsed.data;
       const bin = encodeToSmfBinary(song);
       const data = Buffer.from(bin.buffer, bin.byteOffset, bin.byteLength);
 
