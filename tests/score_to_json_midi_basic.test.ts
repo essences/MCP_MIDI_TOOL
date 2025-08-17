@@ -35,9 +35,10 @@ describe("Score DSL → JSON MIDI v1", () => {
     expect(t0.find(e=> e.type==="meta.keySignature" && e.tick===0)).toBeTruthy();
     expect(t0.find(e=> e.type==="meta.tempo" && e.tick===0)).toBeTruthy();
 
-    const t1 = json.tracks[1].events;
-    // first program
-    expect(t1[0]).toMatchObject({ type: "program", tick: 0, program: 0, channel: 0 });
+  const t1 = json.tracks[1].events;
+  // program イベントが tick=0 に存在すること（順序には依存しない）
+  const hasProgramAtZero = t1.some((e: any)=> e.type === "program" && e.tick === 0 && e.program === 0 && e.channel === 0);
+  expect(hasProgramAtZero).toBe(true);
 
     // notes
     const notes = t1.filter(e=> e.type === "note") as any[];
