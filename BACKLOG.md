@@ -76,7 +76,13 @@
 - [x] 変換: `src/scoreToJsonMidi.ts`（Position/Duration→tick, articulation/dynamic/tie/slur マッピング）
 - [x] ツール: `json_to_smf` の受理拡張（Score DSL v1をフォールバックでコンパイル）
 - [~] テスト: 音価（付点/連符）・アーティキュレーション・tie/slur・メタ（timeSig/keySig/tempo）
+	- [x] 統合: `json_to_smf` が Score DSL を受理（オブジェクト/JSON文字列の両方）する統合テストを追加
+	- [~] 追加ケース: 小節またぎ/メタ変化混在/丸め累積±1tick/複合アーティキュレーション
 - [x] ドキュメント: README 追記と `docs/prompts/claude_test_prompts_v8_score_dsl.md` 追加
+	- [x] レポート: `docs/reports/2025-08-17_score_dsl_fallback_fix.md`（DSLフォールバック不具合の原因/対処/検証）
+
+### 補助
+- [x] スモーク: `scripts/mcp_smoke_e2e_score_dsl.mjs`（Score DSL→json_to_smf→play_smf(dryRun)→smf_to_json）
 
 ## リスク/ブロッカー
 - node-midi のネイティブビルドがOS/Nodeバージョンに依存
