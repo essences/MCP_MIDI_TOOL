@@ -83,6 +83,7 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
 - stop_playback: 再生停止（全ノート消音、タイマ解除、ポートクローズ）
 - find_midi: 名前の部分一致検索
 - get_playback_status: 再生進捗の取得（cursor/lastSentAt/総尺など）
+- trigger_notes: 単発でノート（単音/和音）を即送出（耳トレ/聴音ワンショット）
 
 戻り値はClaude互換の`content: [{type:'text', text: ...}]`を含みます。
 
@@ -98,6 +99,10 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
    - 出力: `dryRun:true` の場合 `{ scheduledEvents, totalDurationMs }` を返却。実再生時は `playbackId` を発行。
 - get_playback_status
    - 出力: `{ playbackId, done, cursorMs, lastSentAt, totalDurationMs }`
+- trigger_notes（単発発音・即時）
+   - 入力: `{ notes: (string[]|number[]), velocity?: number(1-127)=100, durationMs?: number(20-10000)=500, channel?: number(0-15)=0, program?: number(0-127), portName?: string, transpose?: number, dryRun?: boolean }`
+   - 出力: `{ playbackId, scheduledNotes, durationMs, portName? }`（dryRun時は即done相当）
+   - 例: `{ tool:"trigger_notes", arguments:{ notes:["C4","E4","G4"], velocity:96, durationMs:200, portName:"IAC" } }`
 
 ### JSONイベント仕様（抜粋）
 - note: `{ type:"note", tick, pitch(0-127), velocity(1-127), duration>=1, channel? }`

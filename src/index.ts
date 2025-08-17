@@ -65,6 +65,7 @@ async function main() {
   { name: "play_smf", description: "SMFを解析し再生（dryRunで送出なし解析のみ）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" }, startMs: { type: "number" }, stopMs: { type: "number" }, dryRun: { type: "boolean" }, schedulerLookaheadMs: { type: "number" }, schedulerTickMs: { type: "number" } }, required: ["fileId"] } },
   { name: "get_playback_status", description: "再生ステータスを取得（進捗・総尺・デバイスなど）", inputSchema: { type: "object", properties: { playbackId: { type: "string" } }, required: ["playbackId"] } },
   { name: "playback_midi", description: "MIDI再生開始（PoC: durationMsで長さ指定可）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" }, durationMs: { type: "number" } }, required: ["fileId"] } },
+    { name: "trigger_notes", description: "単発でノート（単音/和音）を即時送出（耳トレ用・高速ワンショット）", inputSchema: { type: "object", properties: { notes: { anyOf: [ { type: "array", items: { type: "string" } }, { type: "array", items: { type: "number" } } ] }, velocity: { type: "number" }, durationMs: { type: "number" }, channel: { type: "number" }, program: { type: "number" }, portName: { type: "string" }, transpose: { type: "number" }, dryRun: { type: "boolean" } }, required: ["notes"] } },
         { name: "stop_playback", description: "playbackIdを停止", inputSchema: { type: "object", properties: { playbackId: { type: "string" } }, required: ["playbackId"] } },
         { name: "find_midi", description: "名前でMIDIを検索（部分一致）", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }
       ];
@@ -84,6 +85,112 @@ async function main() {
 
     if (request.method !== "tools/call") return undefined;
     const { name, arguments: args } = request.params as { name: string; arguments?: any };
+    // 便利: 音名→MIDI番号（簡易）
+    function nameToMidiLocal(s: string): number | undefined {
+      const m = /^([A-Ga-g])([#b]?)(-?\d+)$/.exec(String(s).trim());
+      if (!m) return undefined;
+      const letter = m[1].toUpperCase();
+      const acc = m[2];
+      const oct = parseInt(m[3], 10);
+      const baseMap: Record<string, number> = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
+      let sem = baseMap[letter];
+      if (sem === undefined) return undefined;
+      if (acc === '#') sem += 1; else if (acc === 'b') sem -= 1;
+      const midi = 12 * (oct + 1) + sem;
+      if (midi < 0 || midi > 127) return undefined;
+      return midi;
+    }
+
+    // trigger_notes: 単発でNoteOn→一定時間後NoteOff（和音対応）
+    if (name === "trigger_notes") {
+      const rawNotes = args?.notes;
+      if (!Array.isArray(rawNotes) || rawNotes.length === 0) throw new Error("'notes' must be a non-empty array");
+      const channel = Math.max(0, Math.min(15, Number(args?.channel ?? 0) | 0));
+      const velocity = Math.max(1, Math.min(127, Number(args?.velocity ?? 100) | 0));
+      const durationMs = Math.max(20, Math.min(10000, Number(args?.durationMs ?? 500) | 0));
+      const transpose = Number.isFinite(Number(args?.transpose)) ? (Number(args?.transpose) | 0) : 0;
+      const program = Number.isFinite(Number(args?.program)) ? (Number(args?.program) | 0) : undefined;
+      const dryRun = !!args?.dryRun;
+
+      // normalize notes to midi numbers
+      const notes: number[] = [];
+      for (const n of rawNotes) {
+        if (typeof n === 'number' && Number.isFinite(n)) notes.push(Math.max(0, Math.min(127, (n|0) + transpose)));
+        else if (typeof n === 'string') {
+          const m = nameToMidiLocal(n);
+          if (m === undefined) throw new Error(`invalid note name: ${n}`);
+          notes.push(Math.max(0, Math.min(127, m + transpose)));
+        } else {
+          throw new Error(`unsupported note item: ${String(n)}`);
+        }
+      }
+
+      const warnings: string[] = [];
+      const playbackId = randomUUID();
+      const registry: Map<string, any> = (globalThis as any).__playbacks = (globalThis as any).__playbacks || new Map();
+
+      if (dryRun) {
+        registry.set(playbackId, { type: 'oneshot', startedAt: Date.now(), scheduledEvents: notes.length*2, totalDurationMs: durationMs, cursor: notes.length*2, lastSentIndex: notes.length*2 - 1, lookahead: 0, tickInterval: 0, portName: undefined, done: true });
+        return wrap({ ok: true, playbackId, scheduledNotes: notes.length, durationMs, warnings: warnings.length ? warnings : undefined });
+      }
+
+      // 実送出
+      let portNameResolved: string | undefined;
+      try {
+        const Out = await loadMidi();
+        if (!Out) {
+          warnings.push('node-midi not available: trigger is a no-op');
+        } else {
+          const out = new Out();
+          const ports = out.getPortCount?.() ?? 0;
+          let target = 0;
+          const pickByHint = (o:any, hint:string) => {
+            for (let i=0;i<ports;i++){ try{ const nm=o.getPortName(i); if (String(nm).toLowerCase().includes(hint)) return i; }catch{} }
+            return -1;
+          };
+          if (typeof args?.portName === 'string' && args.portName.length>0) {
+            const wanted = pickByHint(out, String(args.portName).toLowerCase());
+            if (wanted>=0) target = wanted;
+          } else {
+            const pref = pickByHint(out, 'iac');
+            const net = pref < 0 ? pickByHint(out, 'network') : pref;
+            const vir = net < 0 ? pickByHint(out, 'virtual') : net;
+            if (vir >= 0) target = vir;
+          }
+          out.openPort(target);
+          try { portNameResolved = String(out.getPortName?.(target)); } catch {}
+
+          // optional program change
+          if (Number.isFinite(program as number)) {
+            out.sendMessage([0xC0 | (channel & 0x0f), (program as number) & 0x7f]);
+          }
+
+          // note on for each note
+          for (const n of notes) {
+            out.sendMessage([0x90 | (channel & 0x0f), n & 0x7f, velocity & 0x7f]);
+          }
+          // schedule note off after duration
+          const timeouts: any[] = [];
+          const to = setTimeout(()=>{
+            try {
+              for (const n of notes) {
+                out.sendMessage([0x80 | (channel & 0x0f), n & 0x7f, 0]);
+              }
+            } finally {
+              try { out.closePort(); } catch {}
+            }
+          }, durationMs);
+          timeouts.push(to);
+
+          // registry for optional stop_playback
+          registry.set(playbackId, { type: 'oneshot', startedAt: Date.now(), scheduledEvents: notes.length*2, totalDurationMs: durationMs, intervalId: null, timeouts, active: new Set(notes.map(n=> `${channel}:${n}`)), out, cursor: notes.length*2, lastSentIndex: notes.length*2 - 1, lastSentAt: durationMs, lookahead: 0, tickInterval: 0, portName: portNameResolved, done: false });
+        }
+      } catch (e:any) {
+        warnings.push(`trigger-warning: ${e?.message || String(e)}`);
+      }
+
+      return wrap({ ok: true, playbackId, scheduledNotes: notes.length, durationMs, portName: portNameResolved, warnings: warnings.length ? warnings : undefined }) as any;
+    }
 
     // store_midi: save base64 to data/midi and update manifest
     if (name === "store_midi") {
