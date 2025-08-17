@@ -206,9 +206,19 @@ async function main() {
           const timeouts: any[] = [];
           const to = setTimeout(()=>{
             try {
+              // 互換性重視: Note Off(0x80)ではなく Note On(0x90) velocity 0 を優先送出
               for (const n of notes) {
-                out.sendMessage([0x80 | (channel & 0x0f), n & 0x7f, 0]);
+                out.sendMessage([0x90 | (channel & 0x0f), n & 0x7f, 0]);
               }
+              // 状態更新（activeをクリアしdone=true）
+              try {
+                const reg: Map<string, any> | undefined = (globalThis as any).__playbacks;
+                const st = reg?.get(playbackId);
+                if (st) {
+                  if (st.active && typeof st.active.clear === 'function') st.active.clear();
+                  st.done = true;
+                }
+              } catch {}
             } finally {
               try { out.closePort(); } catch {}
             }
@@ -481,15 +491,17 @@ async function main() {
     let cursor = 0;
       function schedule(ev: Ev, idx: number){
         // NoteOn/Off メッセージ生成
-        const status = (ev.kind === 'on' ? 0x90 : 0x80) | (ev.ch & 0x0f);
-        const msg = [status, ev.n & 0x7f, ev.v & 0x7f];
+        // Note Offは Note On(velocity 0) を優先
+        const isOn = ev.kind === 'on';
+        const status = (0x90) | (ev.ch & 0x0f);
+        const msg = [status, ev.n & 0x7f, isOn ? (ev.v & 0x7f) : 0];
         const due = t0 + ev.tMs - performance.now();
         const to = setTimeout(()=>{
           try {
             if (state.out) state.out.sendMessage(msg);
             // active管理（ハングノート回避）
             const key = `${ev.ch}:${ev.n}`;
-            if (ev.kind==='on') state.active.add(key); else state.active.delete(key);
+            if (isOn) state.active.add(key); else state.active.delete(key);
       state.lastSentAt = performance.now() - t0;
           } catch {}
         }, Math.max(0, due));
@@ -680,10 +692,20 @@ async function main() {
         // 未消音ノートを消音
         if (st.out && st.active && st.active.size) {
           try {
+            // まず CC123 All Notes Off をアクティブなチャンネルに送出（安全網）
+            const chSet = new Set<number>();
+            for (const key of Array.from(st.active)) {
+              const [chStr] = String(key).split(":");
+              chSet.add((Number(chStr)|0) & 0x0f);
+            }
+            for (const ch of chSet) {
+              st.out.sendMessage([0xB0 | ch, 123, 0]);
+            }
+            // 念のため個別ノートにも Note On(vel0) を送る
             for (const key of Array.from(st.active)) {
               const [chStr, nStr] = String(key).split(":");
               const ch = Number(chStr)|0; const n = Number(nStr)|0;
-              st.out.sendMessage([0x80 | (ch & 0x0f), n & 0x7f, 0]);
+              st.out.sendMessage([0x90 | (ch & 0x0f), n & 0x7f, 0]);
             }
           } catch {}
         }
