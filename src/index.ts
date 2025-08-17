@@ -132,7 +132,10 @@ async function main() {
 
     // json_to_smf: validate JSON via zod, compile to SMF, save, update manifest
     if (name === "json_to_smf") {
-      const json = args?.json;
+      let json = args?.json;
+      if (typeof json === 'string') {
+        try { json = JSON.parse(json); } catch { /* ignore, will fail validation below */ }
+      }
       const fileNameInput: string | undefined = args?.name;
       if (!json) throw new Error("'json' is required for json_to_smf");
 
@@ -142,12 +145,23 @@ async function main() {
       if (parsed.success) {
         song = parsed.data;
       } else {
+        let compileErrMsg = "";
         try {
           const compiled = compileScoreToJsonMidi(json);
-          song = zSong.parse(compiled);
+          try {
+            song = zSong.parse(compiled);
+          } catch (e2: any) {
+            // コンパイル結果のJSON MIDI検証エラー
+            const z2 = e2?.issues?.map?.((i: any) => `${i.path?.join?.('.')}: ${i.message}`).join('; ');
+            compileErrMsg = `compiled-json-invalid: ${z2 || e2?.message || String(e2)}`;
+            throw e2;
+          }
         } catch (e: any) {
+          // 元JSON MIDIのバリデーションエラー
           const issues = parsed.error.issues?.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
-          const msg = issues || parsed.error?.message || e?.message || String(e);
+          const baseMsg = issues || parsed.error?.message || "invalid json";
+          const extra = compileErrMsg || e?.issues?.map?.((i: any)=> `${i.path?.join?.('.')}: ${i.message}`).join('; ') || e?.message || String(e);
+          const msg = `${baseMsg}${extra ? ` | score-compile: ${extra}` : ''}`;
           throw new Error(`json validation failed (or score compile failed): ${msg}`);
         }
       }
