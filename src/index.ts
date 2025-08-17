@@ -75,11 +75,44 @@ async function main() {
       return { resources: [] } as any;
     }
     if (request.method === "prompts/list") {
-      // 現時点ではプロンプトは未提供。空配列を返す。
-      return { prompts: [] } as any;
+      // MCPクライアントから参照できる簡易プロンプトを提供
+      const prompts = [
+        { name: "score_dsl_quick_ref", description: "Score DSL v1の注意点（beatは整数、unit/offset、未対応articulation）" },
+        { name: "trigger_notes_test_v9", description: "trigger_notes 検証用の手順（v9）" },
+      ];
+      return { prompts } as any;
     }
     if (request.method === "prompts/get") {
-      // 利用予定なし。呼ばれた場合は存在しない旨のエラーを返す。
+      const p = request.params as { name?: string };
+      const name = String(p?.name || "");
+      if (name === "score_dsl_quick_ref") {
+        const text = [
+          "Score DSL v1 クイックリファレンス:",
+          "- start.beat は整数のみ。半拍/3連などは unit/offset で指定",
+          "  例) 2.5拍 → { start: { bar:1, beat:2, unit:2, offset:1 } }",
+          "  例) 3連の2つ目/3つ目 → unit:3, offset:1 / 2",
+          "- articulation 許容: staccato | tenuto | legato | accent | marcato",
+          "  （diminuendo 等は未対応。velocity 段階変更や cc で代替）",
+          "- 音名は C4, F#3, Bb5, Ab4, Db5 など（0..127内）",
+          "- 付点:dots=1(×1.5)/2(×1.75), 連符: tuplet: { inSpaceOf, play }",
+          "詳細: docs/specs/score_dsl_v1.md を参照",
+        ].join("\n");
+        // Claude互換: messages.content[].text で返す
+        return { prompt: { name, description: "Score DSL v1 クイックリファレンス", messages: [ { role: "user", content: [ { type: "text", text } ] } ] } } as any;
+      }
+      if (name === "trigger_notes_test_v9") {
+        const text = [
+          "trigger_notes v9 テスト手順（要約）:",
+          "- 準備: ツール一覧で trigger_notes / list_devices / get_playback_status / stop_playback 確認",
+          "- T-1: 単音ドライラン { notes:[\"C4\"], velocity:96, durationMs:150, dryRun:true }",
+          "- T-2: 和音ドライラン（音名） { notes:[\"C4\",\"E4\",\"G4\"], durationMs:200, dryRun:true }",
+          "- T-3: 和音ドライラン（数値+transpose） { notes:[60,64,67], transpose:12, dryRun:true }",
+          "- T-4: 実送出: list_devices→port選択→trigger_notes 実行→get_playback_status→0.3s待機→stop_playback",
+          "- T-5: 異常系: { notes:[\"H4\"], dryRun:true } （エラー期待）",
+          "詳細: docs/prompts/claude_test_prompts_v9_trigger_notes.md を参照",
+        ].join("\n");
+        return { prompt: { name, description: "trigger_notes v9 テスト要約", messages: [ { role: "user", content: [ { type: "text", text } ] } ] } } as any;
+      }
       throw new Error("Prompt not found");
     }
 
