@@ -90,6 +90,7 @@ RationalValue: { `numerator`: number, `denominator`: number }（正確な有理�
 - `staccato`: 実長 = dur * 0.5（既定）。
 - `tenuto`: 実長 = dur * 1.05（ただし次音に食い込まないよう最小(次音開始-1tick)）。
 - `legato` or `slur`: 次音と重なりを作る（overlap=+10% or 最小 5 ticks）。必要に応じ `CC64` on/off で補助（オプション）。
+  - 補足: 必要に応じてサーバの `insert_sustain` ツールで後処理として CC64(127/0) を範囲挿入できます（既存SMFに対する事後付与）。
 - `accent`: ベロシティ +15（上限127）。`marcato`: +25。
 - `tie`: 直前ノートと同pitch連続なら結合し、noteOffを延長（新たなnoteOnは生成しない）。
 
