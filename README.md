@@ -83,6 +83,8 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
 - get_midi: メタ情報を返し、任意でbase64を同梱
 - list_midi: 保存済みMIDI一覧（ページング）
 - export_midi: data/exportへコピー
+- append_to_smf: 既存SMFへJSON/Score DSLチャンクを追記（末尾/指定tick）
+- insert_sustain: 既存SMFにサスティン（CC64）のON/OFFを指定tick範囲で挿入
 - list_devices: MIDI出力デバイス列挙
 - playback_midi: 単音PoC再生（durationMsで長さ指定）
 - play_smf: SMFを解析して再生（dryRun解析、範囲再生、スケジューラ）
@@ -100,6 +102,12 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
       - 未指定の場合は後方互換として「JSON MIDI v1の検証→失敗ならScore DSL v1のコンパイル」へフォールバックします。
    - 出力: `{ fileId, bytes, trackCount, eventCount }`
 - smf_to_json
+- append_to_smf
+   - 入力: `{ fileId: string, json: <JSON MIDI または Score DSL v1>, format?: "json_midi_v1"|"score_dsl_v1", atEnd?: boolean, atTick?: number, gapTicks?: number, trackIndex?: number, outputName?: string }`
+      - `atEnd:true` で既存末尾へ追記。`atTick` 指定時はそのtickから相対配置。
+      - `gapTicks` で追記前に隙間を空ける。`trackIndex` で追記先トラックを選択（未指定は最初の音源トラック）。
+      - `outputName` を指定すると新規ファイルとして保存（未指定は同名上書き）。
+   - 出力: `{ fileId, name, path, bytes, insertedAtTick }`
    - 入力: `{ fileId }`
    - 出力: `{ json: <JSON MIDI>, bytes, trackCount, eventCount }`
 - play_smf（dryRun推奨→実再生）
@@ -155,6 +163,38 @@ Score DSL を直接渡す例（オブジェクト or JSON文字列のどちら�
    }
 }
 ```
+
+append_to_smf（末尾へScore DSLを追記）:
+```jsonc
+{ 
+   "tool": "append_to_smf",
+   "arguments": {
+      "fileId": "<existing-fileId>",
+      "json": { "ppq": 480, "meta": { "timeSignature": { "numerator": 4, "denominator": 4 }, "tempo": { "bpm": 120 } }, "tracks": [ { "channel": 1, "events": [ { "type": "note", "note": "G4", "start": { "bar": 1, "beat": 1 }, "duration": { "value": "1/4" } } ] } ] },
+      "format": "score_dsl_v1",
+      "atEnd": true,
+      "gapTicks": 240
+   }
+}
+```
+
+insert_sustain（CC64のON/OFFを挿入）:
+```jsonc
+{ 
+   "tool": "insert_sustain",
+   "arguments": {
+      "fileId": "<existing-fileId>",
+      "ranges": [
+         { "startTick": 0, "endTick": 720 },
+         { "startTick": 1920, "endTick": 2400, "channel": 0, "trackIndex": 1, "valueOn": 120, "valueOff": 0 }
+      ]
+   }
+}
+```
+備考:
+- 未指定時は、最初の音源トラックを自動選択し、そのトラックのチャンネル（内部0〜15）を継承します。見つからない場合は ch0 を使用。
+- `channel` と `trackIndex` を指定すると明示的に挿入先を制御できます。
+- `valueOn`/`valueOff` は 0〜127 を使用（既定 127/0）。
 
 play_smf（dryRun→実再生）:
 ```jsonc

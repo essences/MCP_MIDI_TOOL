@@ -3,7 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { appendItem, getItemById, readManifest, resolveMidiDir, resolveExportDir, resolveBaseDir } from "./storage.js";
+import { appendItem, getItemById, readManifest, resolveMidiDir, resolveExportDir, resolveBaseDir, writeManifest } from "./storage.js";
 import { zSong } from "./jsonSchema.js";
 import { encodeToSmfBinary } from "./jsonToSmf.js";
 import { decodeSmfToJson } from "./smfToJson.js";
@@ -54,10 +54,12 @@ async function main() {
     });
     // Claude Desktop からの tools/list / resources/list / prompts/list への応答
     if (request.method === "tools/list") {
-      const tools: any[] = [
+  const tools: any[] = [
     { name: "store_midi", description: "base64のMIDIを保存し、fileIdを返す", inputSchema: { type: "object", properties: { base64: { type: "string" }, name: { type: "string" } }, required: ["base64"] } },
   { name: "json_to_smf", description: "JSON曲データをSMFにコンパイルし保存", inputSchema: { type: "object", properties: { json: { anyOf: [ { type: "object" }, { type: "string" } ] }, format: { type: "string", enum: ["json_midi_v1", "score_dsl_v1"] }, name: { type: "string" } , overwrite: { type: "boolean" } }, required: ["json"] } },
   { name: "smf_to_json", description: "SMFを解析してJSON曲データに変換", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
+  { name: "append_to_smf", description: "既存SMFへJSON/Score DSLチャンクを追記（指定tick/末尾）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, json: { anyOf: [ { type: "object" }, { type: "string" } ] }, format: { type: "string", enum: ["json_midi_v1", "score_dsl_v1"] }, atTick: { type: "number" }, atEnd: { type: "boolean" }, gapTicks: { type: "number" }, trackIndex: { type: "number" }, outputName: { type: "string" } }, required: ["fileId", "json"] } },
+  { name: "insert_sustain", description: "CC64(サスティン)のON/OFFを範囲に挿入", inputSchema: { type: "object", properties: { fileId: { type: "string" }, ranges: { type: "array", items: { type: "object", properties: { startTick: { type: "number" }, endTick: { type: "number" }, channel: { type: "number" }, trackIndex: { type: "number" }, valueOn: { type: "number" }, valueOff: { type: "number" } }, required: ["startTick", "endTick"] } } }, required: ["fileId", "ranges"] } },
         { name: "get_midi", description: "fileIdでMIDIメタ情報と任意でbase64を返す", inputSchema: { type: "object", properties: { fileId: { type: "string" }, includeBase64: { type: "boolean" } }, required: ["fileId"] } },
         { name: "list_midi", description: "保存済みMIDIの一覧（ページング）", inputSchema: { type: "object", properties: { limit: { type: "number" }, offset: { type: "number" } } } },
         { name: "export_midi", description: "fileIdをdata/exportへコピー", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
@@ -378,6 +380,200 @@ async function main() {
   const trackCount = Array.isArray(json.tracks) ? json.tracks.length : 0;
   const eventCount = Array.isArray(json.tracks) ? json.tracks.reduce((a: number, t: any)=> a + (Array.isArray(t.events)? t.events.length : 0), 0) : 0;
   return wrap({ ok: true, json, bytes, trackCount, eventCount }) as any;
+    }
+
+    // append_to_smf: 既存SMFにJSON/DSLのチャンクを追記
+    if (name === "append_to_smf") {
+      const fileId: string | undefined = args?.fileId;
+      if (!fileId) throw new Error("'fileId' is required for append_to_smf");
+      let item: ItemRec | undefined = inMemoryIndex.get(fileId);
+      if (!item) item = (await getItemById(fileId)) as ItemRec | undefined;
+      if (!item) throw new Error(`fileId not found: ${fileId}`);
+
+      const format: string | undefined = typeof args?.format === 'string' ? String(args.format) : undefined;
+      let chunk = args?.json;
+      if (typeof chunk === 'string') { try { chunk = JSON.parse(chunk); } catch {} }
+      if (!chunk) throw new Error("'json' is required for append_to_smf");
+
+      // 1) 既存SMFをJSONへ
+      const absPath = path.resolve(resolveBaseDir(), item.path);
+      const buf = await fs.readFile(absPath);
+      const baseJson = await decodeSmfToJson(buf);
+
+      // 2) 追記するチャンクをJSON MIDI v1 へ
+      let addSong: any;
+      if (format === 'json_midi_v1') {
+        addSong = zSong.parse(chunk);
+      } else if (format === 'score_dsl_v1') {
+        const compiled = compileScoreToJsonMidi(chunk);
+        addSong = zSong.parse(compiled);
+      } else {
+        // 後方互換（未指定）: まずJSON MIDI、失敗でDSL
+        const parsed = zSong.safeParse(chunk);
+        if (parsed.success) addSong = parsed.data; else addSong = zSong.parse(compileScoreToJsonMidi(chunk));
+      }
+
+      // 3) 追記位置の決定（atEnd優先→atTick→既定末尾）。gapTicksで隙間を空ける
+      const atEnd: boolean = !!args?.atEnd;
+      const atTickArg = Number.isFinite(Number(args?.atTick)) ? (args.atTick|0) : undefined;
+      const gapTicks = Number.isFinite(Number(args?.gapTicks)) ? Math.max(0, args.gapTicks|0) : 0;
+      const trackIndex = Number.isFinite(Number(args?.trackIndex)) ? Math.max(0, args.trackIndex|0) : undefined;
+
+      // 既存末尾tickを計測
+      const trackEndTicks: number[] = baseJson.tracks.map((tr: any) => {
+        let last = 0;
+        for (const ev of (tr.events||[])) {
+          if (typeof ev.tick === 'number') {
+            if (ev.type === 'note') last = Math.max(last, ev.tick + (ev.duration||0));
+            else last = Math.max(last, ev.tick);
+          }
+        }
+        return last;
+      });
+      const globalEnd = trackEndTicks.length ? Math.max(...trackEndTicks) : 0;
+
+      // 追加対象トラックの選定（指定なければ「最初の音源トラック or 0」）
+      let tgt = trackIndex;
+      if (!Number.isFinite(tgt as number)) {
+        const cand = baseJson.tracks.findIndex((tr: any)=> (tr.events||[]).some((e:any)=> e.type!=="meta.tempo" && e.type!=="meta.timeSignature" && e.type!=="meta.keySignature"));
+        tgt = (cand >= 0 ? cand : 0);
+      }
+      if (!baseJson.tracks[tgt!]) baseJson.tracks[tgt!] = { events: [] };
+
+      // 4) 挿入オフセットの算出
+      const insertTick = atEnd ? (trackEndTicks[tgt!] ?? globalEnd) + gapTicks : (atTickArg ?? (globalEnd + gapTicks));
+
+      // 5) 追加曲の各イベントを insertTick へ相対シフトして追記
+      const dst = baseJson.tracks[tgt!];
+      for (const tr of addSong.tracks) {
+        for (const ev of tr.events) {
+          if (ev.type === 'meta.tempo' || ev.type === 'meta.timeSignature' || ev.type === 'meta.keySignature') {
+            // グローバルメタは track0 に入れる（tickはそのまま/または末尾配置も可）。今回は相対で末尾に付ける
+            const tick = insertTick + (ev.tick|0);
+            if (!baseJson.tracks[0]) baseJson.tracks[0] = { events: [] };
+            baseJson.tracks[0].events.push({ ...ev, tick });
+          } else {
+            const tick = insertTick + (ev.tick|0);
+            dst.events.push({ ...ev, tick });
+          }
+        }
+      }
+
+      // 6) 正規化（簡易: tickでソート、NoteOff順はエンコーダ側のordで制御）
+      for (const tr of baseJson.tracks) {
+        tr.events.sort((a:any,b:any)=>{
+          const ta=a.tick|0, tb=b.tick|0; if (ta!==tb) return ta-tb; return String(a.type).localeCompare(String(b.type));
+        });
+      }
+
+      // 7) SMFへ再エンコード→保存（新規名指定があれば複製）
+      const bin = encodeToSmfBinary(baseJson);
+      const data = Buffer.from(bin.buffer, bin.byteOffset, bin.byteLength);
+      const midiDir = resolveMidiDir();
+      await fs.mkdir(midiDir, { recursive: true });
+      const outName = (typeof args?.outputName === 'string' && args.outputName.trim().length>0) ? args.outputName.trim() : item.name;
+      const nameWithExt = outName.toLowerCase().endsWith('.mid') ? outName : `${outName}.mid`;
+      const absOut = path.join(midiDir, nameWithExt);
+      await fs.writeFile(absOut, data);
+
+      const base = resolveBaseDir();
+      const relPath = path.relative(base, absOut);
+      const bytes = data.byteLength;
+
+      // マニフェスト更新（同名上書きなら既存レコードもあり得る）
+      if (nameWithExt === item.name) {
+        // 同一ファイルを更新：bytesを更新
+        const manifest = await readManifest();
+        const rec = manifest.items.find(i=> i.id === item!.id);
+        if (rec) { rec.bytes = bytes; rec.path = relPath; }
+        await writeManifest(manifest);
+        inMemoryIndex.set(item.id, { ...item, bytes, path: relPath });
+        return wrap({ ok: true, fileId: item.id, name: nameWithExt, path: relPath, bytes, insertedAtTick: insertTick });
+      } else {
+        const newId = randomUUID();
+        const createdAt = new Date().toISOString();
+        const rec = { id: newId, name: nameWithExt, path: relPath, bytes, createdAt };
+        await appendItem(rec);
+        inMemoryIndex.set(newId, rec);
+        return wrap({ ok: true, fileId: newId, name: nameWithExt, path: relPath, bytes, insertedAtTick: insertTick });
+      }
+    }
+
+    // insert_sustain: 指定範囲に CC64 (Sustain) on/off を挿入
+    if (name === "insert_sustain") {
+      const fileId: string | undefined = args?.fileId;
+      const ranges: Array<{ startTick: number; endTick: number; channel?: number; trackIndex?: number; valueOn?: number; valueOff?: number }>|undefined = args?.ranges;
+      if (!fileId) throw new Error("'fileId' is required for insert_sustain");
+      if (!Array.isArray(ranges) || ranges.length === 0) throw new Error("'ranges' must be a non-empty array");
+
+      let item: ItemRec | undefined = inMemoryIndex.get(fileId);
+      if (!item) item = (await getItemById(fileId)) as ItemRec | undefined;
+      if (!item) throw new Error(`fileId not found: ${fileId}`);
+
+      const absPath = path.resolve(resolveBaseDir(), item.path);
+      const buf = await fs.readFile(absPath);
+      const json = await decodeSmfToJson(buf);
+
+      // デフォルトの挿入先トラック/チャンネルを推定
+      const pickTrackIndex = (): number => {
+        // 音源イベントのある最初のトラック
+        const cand = json.tracks.findIndex((tr: any)=> (tr.events||[]).some((e:any)=> e.type!=='meta.tempo' && e.type!=='meta.timeSignature' && e.type!=='meta.keySignature'));
+        return cand >= 0 ? cand : 0;
+      };
+      const ensureTrack = (idx: number) => { if (!json.tracks[idx]) json.tracks[idx] = { events: [] }; };
+      const guessChannelFromTrack = (tr: any): number|undefined => {
+        if (Number.isFinite(Number(tr?.channel))) return (tr.channel|0);
+        const ev = (tr?.events||[]).find((e:any)=> (e.channel!==undefined));
+        if (ev && Number.isFinite(Number(ev.channel))) return (ev.channel|0);
+        return undefined;
+      };
+
+      for (const r of ranges) {
+        const start = Math.max(0, Number((r as any).startTick|0));
+        const end = Math.max(start, Number((r as any).endTick|0));
+        const rr: any = r as any;
+        const onRaw = rr.valueOn;
+        const offRaw = rr.valueOff;
+        const valueOn = Number.isFinite(Number(onRaw)) ? Math.max(0, Math.min(127, Number(onRaw))) : 127;
+        const valueOff = Number.isFinite(Number(offRaw)) ? Math.max(0, Math.min(127, Number(offRaw))) : 0;
+        // 挿入先
+        const tIdx = Number.isFinite(Number(rr.trackIndex)) ? Math.max(0, Number(rr.trackIndex)) : pickTrackIndex();
+        ensureTrack(tIdx);
+        let chVal: number | undefined = Number.isFinite(Number(rr.channel)) ? Number(rr.channel) : guessChannelFromTrack(json.tracks[tIdx]);
+        let ch = Number.isFinite(Number(chVal)) ? Number(chVal) : 0;
+        if (!Number.isFinite(ch as number)) ch = 0;
+        ch = Math.max(0, Math.min(15, ch as number));
+
+        json.tracks[tIdx].events.push({ type: 'cc', tick: start, controller: 64, value: valueOn, channel: ch });
+        json.tracks[tIdx].events.push({ type: 'cc', tick: end, controller: 64, value: valueOff, channel: ch });
+        // 近傍の重複を軽減（同tickに複数が重ならないよう簡易除去）
+        json.tracks[tIdx].events = json.tracks[tIdx].events.filter((ev:any, i:number, arr:any[])=>{
+          if (ev.type !== 'cc' || ev.controller !== 64) return true;
+          const key = `${ev.tick}:${ev.value}:${ev.channel ?? 'x'}`;
+          const first = arr.findIndex((e:any)=> e.type==='cc' && e.controller===64 && (e.tick|0)===(ev.tick|0) && (e.value|0)===(ev.value|0) && ((e.channel??'x')===(ev.channel??'x')));
+          return first === i;
+        }).sort((a:any,b:any)=> (a.tick|0)-(b.tick|0));
+      }
+
+      // 再エンコードして保存（上書き）
+      const bin = encodeToSmfBinary(json);
+      const data = Buffer.from(bin.buffer, bin.byteOffset, bin.byteLength);
+      const midiDir = resolveMidiDir();
+      await fs.mkdir(midiDir, { recursive: true });
+      const absOut = path.join(midiDir, item.name);
+      await fs.writeFile(absOut, data);
+      const base = resolveBaseDir();
+      const relPath = path.relative(base, absOut);
+      const bytes = data.byteLength;
+
+      // マニフェスト更新
+      const manifest = await readManifest();
+      const rec = manifest.items.find(i=> i.id === item!.id);
+      if (rec) { rec.bytes = bytes; rec.path = relPath; }
+      await writeManifest(manifest);
+      inMemoryIndex.set(item.id, { ...item, bytes, path: relPath });
+
+      return wrap({ ok: true, fileId: item.id, name: item.name, path: relPath, bytes }) as any;
     }
 
     // play_smf: parse SMF and schedule playback (or dryRun for analysis only)
