@@ -32,6 +32,7 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
    ]
 }
 ```
+注: 上記は内部 JSON MIDI v1 の構造例です。実際に `json_to_smf` ツールへ渡す場合は `format: "json_midi_v1"` を指定してください（下のツール呼び出し例を参照）。
 
 注意（チャンネル表記について）
 - 上記は内部の JSON MIDI v1 例です。チャンネルは内部値 0〜15（ch1=0）で表されます。
@@ -61,6 +62,7 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
 - `start.beat` は整数（小数不可）。半拍や3連位置は `unit`/`offset` で表現します。
 - `articulation` の許容は `staccato|tenuto|legato|accent|marcato`。`diminuendo` は未対応（`velocity`/`cc`で代替）。
 
+注: 上記は Score DSL v1 の構造例です。実際に `json_to_smf` ツールへ渡す場合は `format: "score_dsl_v1"` を指定してください（下のツール呼び出し例を参照）。
 詳細は `docs/specs/score_dsl_v1.md` を参照。
 ### 対応イベント一覧（現状）
 - ノート: note（ON/OFF、velocity、durationTicks）
