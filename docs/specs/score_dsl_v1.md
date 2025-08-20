@@ -17,6 +17,7 @@
   - `tempo`: { `bpm`: number } | { `changes`: Array<{ bar:number, beat:number, bpm:number }> }
   - `title?`: string
   - `composer?`: string
+    - `autoCcPresets?`: Array<AutoCcPreset>（スコア→SMF時にCCを自動付与するプリセット。最小: `sustain_from_slur`）
 - `tracks`: Array<Track>
 
 Track:
@@ -61,6 +62,10 @@ NotationValue: "1|1/2|1/4|1/8|1/16|1/32"（全/2分/4分/8分...）
 注意（重要）: 全音符は "1" を指定してください（"1/1" は無効・非対応）。
 
 RationalValue: { `numerator`: number, `denominator`: number }（正確な有理数指定）
+
+AutoCcPreset（最小）:
+- `id`: "sustain_from_slur" — slur もしくは articulation=="legato" が連続する区間に対し、CC64 の 127（開始）/0（終了）を自動付与。
+  - 指定例: `meta.autoCcPresets: [ { id: "sustain_from_slur" } ]`
 
 ---
 

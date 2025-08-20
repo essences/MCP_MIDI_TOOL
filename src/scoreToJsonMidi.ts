@@ -185,6 +185,32 @@ export function compileScoreToJsonMidi(input: unknown): JsonMidiSong {
       t.events.push({ type: "note", tick: n.startTick, pitch: n.pitch, velocity: n.velocity, duration: n.durTicks, channel: st.channel });
     }
 
+    // autoCcPresets: sustain_from_slur（slur/legatoの持続区間にCC64 on/off）
+    if (meta.autoCcPresets?.some(p => p.id === "sustain_from_slur")) {
+      // 連続した slur or articulation==="legato" のノートをまとめて区間化
+      type Seg = { start: number; end: number };
+      const segs: Seg[] = [];
+      let cur: Seg | null = null;
+      for (let i=0; i<merged.length; i++) {
+        const n = merged[i];
+        const isLeg = n.slur || n.articulation === "legato";
+        const nStart = n.startTick;
+        const nEnd = n.startTick + n.durTicks;
+        if (isLeg) {
+          if (!cur) cur = { start: nStart, end: nEnd };
+          else cur.end = Math.max(cur.end, nEnd);
+        } else {
+          if (cur) { segs.push(cur); cur = null; }
+        }
+      }
+      if (cur) segs.push(cur);
+
+      for (const s of segs) {
+        t.events.push({ type: "cc", tick: s.start, controller: 64, value: 127, channel: st.channel });
+        t.events.push({ type: "cc", tick: s.end, controller: 64, value: 0, channel: st.channel });
+      }
+    }
+
     tracks.push(t);
   }
 

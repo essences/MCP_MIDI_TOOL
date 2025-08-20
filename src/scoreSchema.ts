@@ -73,6 +73,14 @@ export const zScore = z.object({
     tempo: zTempo,
     title: z.string().optional(),
     composer: z.string().optional(),
+    // 自動CC付与プリセット（最小実装）：sustain_from_slur
+    autoCcPresets: z
+      .array(
+        z.object({
+          id: z.enum(["sustain_from_slur"]),
+        })
+      )
+      .optional(),
   }),
   tracks: z.array(zScoreTrack).min(1),
 });
