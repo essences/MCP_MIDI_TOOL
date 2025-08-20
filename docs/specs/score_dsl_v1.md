@@ -126,6 +126,8 @@ RationalValue: { `numerator`: number, `denominator`: number }（正確な有理�
 - 未対応: `crescendo / diminuendo` などの継続系表現。
   - 回避策A（簡易）: ノートごとの `velocity`/`dynamic(pp..ff)` を段階的に変化させる。
   - 回避策B（発展）: `cc` イベント（例: `cc:11 Expression`）を時間軸に並べて疑似フェーダーを作る。
+    - MCPサーバの `insert_cc` ツールを使えば、既存SMFに対して任意のCC番号（例: CC11 Expression, CC1 Modulation等）のON/OFFやフェーダー的な値を範囲で一括挿入できます。
+    - 例: crescendo/diminuendoや表現記号をScore DSLで記述→SMF化→`insert_cc`でCC値を範囲挿入→play_smf(dryRun)で確認。
 
 3) 音名の書式
 - 許容: `C4, F#3, Bb5, Ab4, Db5` など（`[A-G](#|b)?-?\d+`）。
@@ -233,6 +235,7 @@ Score DSL v1 を MCP ツール `json_to_smf` に渡す際は、`format: "score_d
 
 ## 拡張余地
 - ダイナミクス記号→ベロシティ曲線（クレッシェンド/デクレッシェンド）
-- 表現記号→CC（サステイン/モジュレーション）自動付与のプリセット
+- 表現記号→CC（サステイン/モジュレーション/Expression等）自動付与のプリセット（将来: Score DSL→SMF時に自動CC挿入オプション）
+- MCPツール `insert_cc` による任意CCの範囲一括挿入（後処理で柔軟な表現制御が可能）
 - スウィング（シャッフル比）
 - キー変化・拍子変化の途中挿入

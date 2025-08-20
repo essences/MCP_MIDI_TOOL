@@ -85,6 +85,7 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
 - export_midi: data/exportへコピー
 - append_to_smf: 既存SMFへJSON/Score DSLチャンクを追記（末尾/指定tick）
 - insert_sustain: 既存SMFにサスティン（CC64）のON/OFFを指定tick範囲で挿入
+- insert_cc: 既存SMFに任意のCC番号のON/OFF相当（2値）を指定tick範囲で挿入
 - list_devices: MIDI出力デバイス列挙
 - playback_midi: 単音PoC再生（durationMsで長さ指定）
 - play_smf: SMFを解析して再生（dryRun解析、範囲再生、スケジューラ）
@@ -191,10 +192,31 @@ insert_sustain（CC64のON/OFFを挿入）:
    }
 }
 ```
+
+insert_cc（任意CCのON/OFF相当を挿入）:
+```jsonc
+{
+   "tool": "insert_cc",
+   "arguments": {
+      "fileId": "<existing-fileId>",
+      "controller": 11,
+      "ranges": [
+         { "startTick": 0, "endTick": 480, "valueOn": 90, "valueOff": 40 }
+      ]
+   }
+}
+```
+備考:
+- `controller` は 0〜127。`channel` は 1〜16（外部）もしくは 0〜15（内部）で指定可能。
+- 仕様・挙動は概ね insert_sustain と同様（同tickでのON/OFF、値域、trackIndex継承/明示）。
+ - 複数レンジや重なりレンジを与えた場合、イベントはそのまま挿入されます（レンジのマージは行いません）。ただし、完全重複の同一イベント（tick/値/チャンネル一致）は重複除去されます。
 備考:
 - 未指定時は、最初の音源トラックを自動選択し、そのトラックのチャンネル（内部0〜15）を継承します。見つからない場合は ch0 を使用。
-- `channel` と `trackIndex` を指定すると明示的に挿入先を制御できます。
+- `channel` は外部表記 1〜16 も受け付けます（内部 0〜15 に自動マップ）。内部表記 0〜15 の指定も可。
+- `trackIndex` を指定すると挿入先トラックを明示できます。
 - `valueOn`/`valueOff` は 0〜127 を使用（既定 127/0）。
+   - 同tickでのON/OFも可能（startTick===endTickのときは同tickに両方のイベントが入ります）。
+   - ハーフペダル等の任意値も指定可能（例: valueOn:100, valueOff:20）。
 
 play_smf（dryRun→実再生）:
 ```jsonc

@@ -60,6 +60,7 @@ async function main() {
   { name: "smf_to_json", description: "SMFを解析してJSON曲データに変換", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
   { name: "append_to_smf", description: "既存SMFへJSON/Score DSLチャンクを追記（指定tick/末尾）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, json: { anyOf: [ { type: "object" }, { type: "string" } ] }, format: { type: "string", enum: ["json_midi_v1", "score_dsl_v1"] }, atTick: { type: "number" }, atEnd: { type: "boolean" }, gapTicks: { type: "number" }, trackIndex: { type: "number" }, outputName: { type: "string" } }, required: ["fileId", "json"] } },
   { name: "insert_sustain", description: "CC64(サスティン)のON/OFFを範囲に挿入", inputSchema: { type: "object", properties: { fileId: { type: "string" }, ranges: { type: "array", items: { type: "object", properties: { startTick: { type: "number" }, endTick: { type: "number" }, channel: { type: "number" }, trackIndex: { type: "number" }, valueOn: { type: "number" }, valueOff: { type: "number" } }, required: ["startTick", "endTick"] } } }, required: ["fileId", "ranges"] } },
+  { name: "insert_cc", description: "任意のCC番号の値を範囲に挿入（ON/OFF相当の2値）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, controller: { type: "number" }, ranges: { type: "array", items: { type: "object", properties: { startTick: { type: "number" }, endTick: { type: "number" }, channel: { type: "number" }, trackIndex: { type: "number" }, valueOn: { type: "number" }, valueOff: { type: "number" } }, required: ["startTick", "endTick"] } } }, required: ["fileId", "controller", "ranges"] } },
         { name: "get_midi", description: "fileIdでMIDIメタ情報と任意でbase64を返す", inputSchema: { type: "object", properties: { fileId: { type: "string" }, includeBase64: { type: "boolean" } }, required: ["fileId"] } },
         { name: "list_midi", description: "保存済みMIDIの一覧（ページング）", inputSchema: { type: "object", properties: { limit: { type: "number" }, offset: { type: "number" } } } },
         { name: "export_midi", description: "fileIdをdata/exportへコピー", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
@@ -539,8 +540,15 @@ async function main() {
         // 挿入先
         const tIdx = Number.isFinite(Number(rr.trackIndex)) ? Math.max(0, Number(rr.trackIndex)) : pickTrackIndex();
         ensureTrack(tIdx);
+        // channel受理: 1-16（外部表記）→内部0-15 / 0-15（内部表記）も許容
         let chVal: number | undefined = Number.isFinite(Number(rr.channel)) ? Number(rr.channel) : guessChannelFromTrack(json.tracks[tIdx]);
-        let ch = Number.isFinite(Number(chVal)) ? Number(chVal) : 0;
+        let ch: number;
+        if (Number.isFinite(Number(chVal))) {
+          const c = Number(chVal);
+          if (c >= 1 && c <= 16) ch = c - 1; else ch = c; // 外部表記なら-1
+        } else {
+          ch = 0;
+        }
         if (!Number.isFinite(ch as number)) ch = 0;
         ch = Math.max(0, Math.min(15, ch as number));
 
@@ -567,6 +575,85 @@ async function main() {
       const bytes = data.byteLength;
 
       // マニフェスト更新
+      const manifest = await readManifest();
+      const rec = manifest.items.find(i=> i.id === item!.id);
+      if (rec) { rec.bytes = bytes; rec.path = relPath; }
+      await writeManifest(manifest);
+      inMemoryIndex.set(item.id, { ...item, bytes, path: relPath });
+
+      return wrap({ ok: true, fileId: item.id, name: item.name, path: relPath, bytes }) as any;
+    }
+
+    // insert_cc: 指定範囲に任意CCの on/off を挿入
+    if (name === "insert_cc") {
+      const fileId: string | undefined = args?.fileId;
+      const controller: number | undefined = args?.controller;
+      const ranges: Array<{ startTick: number; endTick: number; channel?: number; trackIndex?: number; valueOn?: number; valueOff?: number }>|undefined = args?.ranges;
+      if (!fileId) throw new Error("'fileId' is required for insert_cc");
+      if (!Number.isFinite(Number(controller))) throw new Error("'controller' is required (0-127)");
+      const ctrl = Math.max(0, Math.min(127, Number(controller)));
+      if (!Array.isArray(ranges) || ranges.length === 0) throw new Error("'ranges' must be a non-empty array");
+
+      let item: ItemRec | undefined = inMemoryIndex.get(fileId);
+      if (!item) item = (await getItemById(fileId)) as ItemRec | undefined;
+      if (!item) throw new Error(`fileId not found: ${fileId}`);
+
+      const absPath = path.resolve(resolveBaseDir(), item.path);
+      const buf = await fs.readFile(absPath);
+      const json = await decodeSmfToJson(buf);
+
+      const pickTrackIndex = (): number => {
+        const cand = json.tracks.findIndex((tr: any)=> (tr.events||[]).some((e:any)=> e.type!=='meta.tempo' && e.type!=='meta.timeSignature' && e.type!=='meta.keySignature'));
+        return cand >= 0 ? cand : 0;
+      };
+      const ensureTrack = (idx: number) => { if (!json.tracks[idx]) json.tracks[idx] = { events: [] }; };
+      const guessChannelFromTrack = (tr: any): number|undefined => {
+        if (Number.isFinite(Number(tr?.channel))) return (tr.channel|0);
+        const ev = (tr?.events||[]).find((e:any)=> (e.channel!==undefined));
+        if (ev && Number.isFinite(Number(ev.channel))) return (ev.channel|0);
+        return undefined;
+      };
+
+      for (const r of ranges) {
+        const start = Math.max(0, Number((r as any).startTick|0));
+        const end = Math.max(start, Number((r as any).endTick|0));
+        const rr: any = r as any;
+        const onRaw = rr.valueOn;
+        const offRaw = rr.valueOff;
+        const valueOn = Number.isFinite(Number(onRaw)) ? Math.max(0, Math.min(127, Number(onRaw))) : 127;
+        const valueOff = Number.isFinite(Number(offRaw)) ? Math.max(0, Math.min(127, Number(offRaw))) : 0;
+        const tIdx = Number.isFinite(Number(rr.trackIndex)) ? Math.max(0, Number(rr.trackIndex)) : pickTrackIndex();
+        ensureTrack(tIdx);
+        // channel 1-16外部表記→内部0-15
+        let chVal: number | undefined = Number.isFinite(Number(rr.channel)) ? Number(rr.channel) : guessChannelFromTrack(json.tracks[tIdx]);
+        let ch: number;
+        if (Number.isFinite(Number(chVal))) {
+          const c = Number(chVal);
+          if (c >= 1 && c <= 16) ch = c - 1; else ch = c;
+        } else {
+          ch = 0;
+        }
+
+        json.tracks[tIdx].events.push({ type: 'cc', tick: start, controller: ctrl, value: valueOn, channel: ch });
+        json.tracks[tIdx].events.push({ type: 'cc', tick: end, controller: ctrl, value: valueOff, channel: ch });
+        json.tracks[tIdx].events = json.tracks[tIdx].events.filter((ev:any, i:number, arr:any[])=>{
+          if (ev.type !== 'cc' || ev.controller !== ctrl) return true;
+          const key = `${ev.tick}:${ev.value}:${ev.channel ?? 'x'}`;
+          const first = arr.findIndex((e:any)=> e.type==='cc' && e.controller===ctrl && (e.tick|0)===(ev.tick|0) && (e.value|0)===(ev.value|0) && ((e.channel??'x')===(ev.channel??'x')));
+          return first === i;
+        }).sort((a:any,b:any)=> (a.tick|0)-(b.tick|0));
+      }
+
+      const bin = encodeToSmfBinary(json);
+      const data = Buffer.from(bin.buffer, bin.byteOffset, bin.byteLength);
+      const midiDir = resolveMidiDir();
+      await fs.mkdir(midiDir, { recursive: true });
+      const absOut = path.join(midiDir, item.name);
+      await fs.writeFile(absOut, data);
+      const base = resolveBaseDir();
+      const relPath = path.relative(base, absOut);
+      const bytes = data.byteLength;
+
       const manifest = await readManifest();
       const rec = manifest.items.find(i=> i.id === item!.id);
       if (rec) { rec.bytes = bytes; rec.path = relPath; }

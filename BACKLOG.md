@@ -12,6 +12,7 @@
 5. [x] R7: ツール `append_to_smf`（追記合成: atEnd/atTick/gapTicks/trackIndex｜README＋E2Eテスト）
 6. [x] R7: `json_to_smf` に format 明示パラメータを導入（`json_midi_v1`/`score_dsl_v1`）＋README更新＋テスト
 7. [x] R7: ツール `insert_sustain`（CC64のON/OFFを範囲挿入｜チャンネル/トラック継承・明示指定両対応｜README＋E2E）
+12. [x] R7: ツール `insert_cc`（任意CCの2値レンジ挿入｜README＋E2E）
 8. [ ] R3: 観測性（構造化ログ/共通エラーモデル/操作IDトレース）※変換メトリクスは実装済み
 9. [ ] R4: CIで各OSのビルドとdryRunスモーク（macOS/Windows/Linux）
 10. [ ] R4: Windows/Linux のデバイス列挙・出力の実機検証
@@ -110,6 +111,8 @@
  - `append_to_smf` を実装し、E2Eで atEnd/gapTicks と atTick の双方をGREENに。Score DSL と JSON MIDI v1 の混在追記もドキュメント化。
  - `json_to_smf` に format 明示を入れ、誤検出を防止。READMEのサンプルもformatを明記。
  - `insert_sustain` を実装。最初の音源トラック/チャンネルの継承を既定とし、レンジごとに CC64(127/0) を挿入。E2Eで0..720tickのON/OFFを確認しGREEN。
+ - `insert_sustain` のE2Eを拡充（複数レンジ/重なり/外部ch(1-16)マッピング/同tick境界/任意値）。READMEに同tick/半踏みの注意を追記。
+ - `insert_cc` を実装し、Expression(CC11)の範囲挿入テストを追加。READMEに使用例と注意を追記。
 
 ### 次の改善（テスト駆動）
 - insert_sustain: 複数レンジ・重なりレンジ・境界tick（0/終端/同tickON/OFF）・明示channel/trackIndexの各ケースを追加テスト
