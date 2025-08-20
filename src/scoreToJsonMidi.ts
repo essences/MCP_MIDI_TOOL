@@ -185,7 +185,7 @@ export function compileScoreToJsonMidi(input: unknown): JsonMidiSong {
       t.events.push({ type: "note", tick: n.startTick, pitch: n.pitch, velocity: n.velocity, duration: n.durTicks, channel: st.channel });
     }
 
-    // autoCcPresets: sustain_from_slur（slur/legatoの持続区間にCC64 on/off）
+  // autoCcPresets: sustain_from_slur（slur/legatoの持続区間にCC64 on/off）
     if (meta.autoCcPresets?.some(p => p.id === "sustain_from_slur")) {
       // 連続した slur or articulation==="legato" のノートをまとめて区間化
       type Seg = { start: number; end: number };
@@ -208,6 +208,47 @@ export function compileScoreToJsonMidi(input: unknown): JsonMidiSong {
       for (const s of segs) {
         t.events.push({ type: "cc", tick: s.start, controller: 64, value: 127, channel: st.channel });
         t.events.push({ type: "cc", tick: s.end, controller: 64, value: 0, channel: st.channel });
+      }
+    }
+
+    // autoCcPresets: crescendo_to_expression（dynamic変化に合わせてCC11をランプ）
+    if (meta.autoCcPresets?.some(p => p.id === "crescendo_to_expression")) {
+      // ノートの順序に沿って dynamic の変化点を抽出し、CC11で線形補間する
+      type DynPt = { tick: number; value: number };
+      const dynToVal = (d?: string): number | undefined => {
+        if (!d) return undefined;
+        const v = (dynToVel as any)[d];
+        return typeof v === 'number' ? clamp(Math.round(v), 1, 127) : undefined;
+      };
+      const pts: DynPt[] = [];
+      let lastVal: number | undefined;
+      for (const n of merged) {
+        const v = dynToVal(n.dynamic);
+        if (v !== undefined) {
+          if (lastVal === undefined || v !== lastVal) {
+            pts.push({ tick: n.startTick, value: v });
+            lastVal = v;
+          }
+        }
+      }
+      // 少なくとも2点必要（区間がないとランプ不可）
+      for (let i=0; i<pts.length-1; i++) {
+        const a = pts[i];
+        const b = pts[i+1];
+        if (b.tick <= a.tick) continue;
+        // a→b を線形補間: 端点 + 中間をppq/4ごと（粗すぎるとイベント過多、細すぎない程度）
+        const start = a.tick;
+        const end = b.tick;
+        const span = end - start;
+        const step = Math.max(1, Math.round(ppq/4));
+        const emit = (tk: number, val: number) => t.events.push({ type: "cc", tick: tk, controller: 11, value: clamp(Math.round(val), 0, 127), channel: st.channel });
+        emit(start, a.value);
+        for (let tk=start+step; tk<end; tk+=step) {
+          const ratio = (tk - start) / span;
+          const val = a.value + (b.value - a.value) * ratio;
+          emit(tk, val);
+        }
+        emit(end, b.value);
       }
     }
 

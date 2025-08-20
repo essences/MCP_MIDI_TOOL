@@ -17,7 +17,7 @@
   - `tempo`: { `bpm`: number } | { `changes`: Array<{ bar:number, beat:number, bpm:number }> }
   - `title?`: string
   - `composer?`: string
-    - `autoCcPresets?`: Array<AutoCcPreset>（スコア→SMF時にCCを自動付与するプリセット。最小: `sustain_from_slur`）
+    - `autoCcPresets?`: Array<AutoCcPreset>（スコア→SMF時にCCを自動付与するプリセット。最小: `sustain_from_slur` / `crescendo_to_expression`）
 - `tracks`: Array<Track>
 
 Track:
@@ -66,6 +66,9 @@ RationalValue: { `numerator`: number, `denominator`: number }（正確な有理�
 AutoCcPreset（最小）:
 - `id`: "sustain_from_slur" — slur もしくは articulation=="legato" が連続する区間に対し、CC64 の 127（開始）/0（終了）を自動付与。
   - 指定例: `meta.autoCcPresets: [ { id: "sustain_from_slur" } ]`
+- `id`: "crescendo_to_expression" — ノートに付与された `dynamic`（pp|p|mp|mf|f|ff）の変化点に合わせ、CC11(Expression)を線形補間でランプ生成。
+  - 指定例: `meta.autoCcPresets: [ { id: "crescendo_to_expression" } ]`
+  - 実装ノート: 端点と約 ppq/4 刻みでサンプリングし、イベント過多を回避。
 
 ---
 

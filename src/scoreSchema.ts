@@ -73,11 +73,11 @@ export const zScore = z.object({
     tempo: zTempo,
     title: z.string().optional(),
     composer: z.string().optional(),
-    // 自動CC付与プリセット（最小実装）：sustain_from_slur
+  // 自動CC付与プリセット（最小実装）：sustain_from_slur / crescendo_to_expression
     autoCcPresets: z
       .array(
         z.object({
-          id: z.enum(["sustain_from_slur"]),
+      id: z.enum(["sustain_from_slur", "crescendo_to_expression"]),
         })
       )
       .optional(),
