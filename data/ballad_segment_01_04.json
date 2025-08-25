@@ -1,0 +1,82 @@
+{
+  "format": 1,
+  "ppq": 480,
+  "tracks": [
+    {
+      "events": [
+        { "type": "meta.tempo", "tick": 0, "usPerQuarter": 833333 },
+        { "type": "meta.timeSignature", "tick": 0, "numerator": 4, "denominator": 4 },
+        { "type": "meta.keySignature", "tick": 0, "sf": 0, "mi": 0 }
+      ]
+    },
+    {
+      "name": "Piano",
+      "channel": 0,
+      "events": [
+  { "type": "program", "tick": 0, "program": 0 },
+        { "type": "note", "tick": 0,    "pitch": 36, "velocity": 58, "duration": 240 },
+        { "type": "note", "tick": 240,  "pitch": 43, "velocity": 58, "duration": 240 },
+        { "type": "note", "tick": 480,  "pitch": 52, "velocity": 58, "duration": 240 },
+        { "type": "note", "tick": 720,  "pitch": 43, "velocity": 58, "duration": 240 },
+        { "type": "note", "tick": 960,  "pitch": 48, "velocity": 58, "duration": 240 },
+        { "type": "note", "tick": 1200, "pitch": 43, "velocity": 58, "duration": 240 },
+        { "type": "note", "tick": 1440, "pitch": 52, "velocity": 58, "duration": 240 },
+        { "type": "note", "tick": 1680, "pitch": 43, "velocity": 58, "duration": 240 },
+
+        
+        { "type": "note", "tick": 1920, "pitch": 47, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 2160, "pitch": 50, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 2400, "pitch": 55, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 2640, "pitch": 50, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 2880, "pitch": 47, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 3120, "pitch": 50, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 3360, "pitch": 55, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 3600, "pitch": 50, "velocity": 60, "duration": 240 },
+
+        
+        { "type": "note", "tick": 3840, "pitch": 45, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 4080, "pitch": 52, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 4320, "pitch": 55, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 4560, "pitch": 52, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 4800, "pitch": 45, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 5040, "pitch": 52, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 5280, "pitch": 48, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 5520, "pitch": 52, "velocity": 60, "duration": 240 },
+
+        
+        { "type": "note", "tick": 5760, "pitch": 41, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 6000, "pitch": 48, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 6240, "pitch": 45, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 6480, "pitch": 48, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 6720, "pitch": 41, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 6960, "pitch": 48, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 7200, "pitch": 52, "velocity": 60, "duration": 240 },
+        { "type": "note", "tick": 7440, "pitch": 48, "velocity": 60, "duration": 240 },
+
+        
+        { "type": "note", "tick": 0,    "pitch": 67, "velocity": 82, "duration": 480 },
+        { "type": "note", "tick": 480,  "pitch": 64, "velocity": 80, "duration": 480 },
+        { "type": "note", "tick": 960,  "pitch": 62, "velocity": 78, "duration": 480 },
+        { "type": "note", "tick": 1440, "pitch": 60, "velocity": 76, "duration": 480 },
+
+        
+        { "type": "note", "tick": 1920, "pitch": 59, "velocity": 78, "duration": 480 },
+        { "type": "note", "tick": 2400, "pitch": 62, "velocity": 80, "duration": 480 },
+        { "type": "note", "tick": 2880, "pitch": 67, "velocity": 84, "duration": 480 },
+        { "type": "note", "tick": 3360, "pitch": 69, "velocity": 86, "duration": 240 },
+        { "type": "note", "tick": 3600, "pitch": 71, "velocity": 88, "duration": 240 },
+
+        
+        { "type": "note", "tick": 3840, "pitch": 72, "velocity": 86, "duration": 720 },
+        { "type": "note", "tick": 4560, "pitch": 64, "velocity": 78, "duration": 240 },
+        { "type": "note", "tick": 4800, "pitch": 62, "velocity": 76, "duration": 240 },
+        { "type": "note", "tick": 5040, "pitch": 60, "velocity": 74, "duration": 480 },
+
+        
+        { "type": "note", "tick": 5760, "pitch": 69, "velocity": 84, "duration": 480 },
+        { "type": "note", "tick": 6240, "pitch": 67, "velocity": 82, "duration": 480 },
+        { "type": "note", "tick": 6720, "pitch": 65, "velocity": 78, "duration": 960 }
+      ]
+    }
+  ]
+}

@@ -382,6 +382,35 @@ play_smf（dryRun→実再生）:
 これらはクライアント側のログやガードレール（過大サイズ回避）に活用できます。
 
 ## 既知の制限/注意
+### 構造化エラーコード（MCPレスポンス）
+全ツールは失敗時に `ok:false` と以下のような構造化エラーを返します:
+```json
+{
+   "ok": false,
+   "error": {
+      "tool": "json_to_smf",
+      "code": "VALIDATION_ERROR",
+      "message": "score_dsl_v1 compile/validation failed: ...",
+      "hint": "入力JSON/Score DSL のスキーマを README と docs/specs を参照して修正してください (format指定推奨)",
+      "issues": [ { "path": ["tracks",0,"events",1,"pitch"], "message": "Expected number" } ]
+   }
+}
+```
+コード一覧:
+- MISSING_PARAMETER: 必須パラメータ欠如
+- NOT_FOUND: fileId 等が存在しない
+- VALIDATION_ERROR: スキーマ検証/コンパイル失敗（Zod issues 付随可）
+- INPUT_FORMAT_ERROR: 音名/JSON構造等の軽度フォーマット不正
+- LIMIT_EXCEEDED: サイズ上限超過等
+- DEVICE_UNAVAILABLE: node-midi 等デバイス未利用可能
+- INTERNAL_ERROR: 想定外例外（Stackはログにのみ出力推奨）
+
+クライアント実装指針:
+1. ok===false → error.code で分岐
+2. hint があればユーザ提示
+3. issues があればパス単位で再生成プロンプトへ投入
+4. VALIDATION_ERROR かつ format 未指定の場合は次回 format 明示
+
 ### Score DSL / JSON MIDI のエラーの読み方（format導入後）
 - `format` を指定した場合:
    - `format: "json_midi_v1"` では `json_midi_v1 validation failed: ...` の形でZodの検証エラーが返ります。

@@ -162,3 +162,28 @@ export type JsonMidiSong = z.infer<typeof zSong>;
 - SysEx/Rawのセーフリスト化、歌詞/テキスト系の拡張
 - Key/TimeSigの中間表現整備（全曲共通/トラック局所）
 - 巨大曲の分割/圧縮（MCP転送最適化）
+
+---
+## 構造化エラー応答ポリシー（実装リファレンス）
+MCPツール呼び出し失敗時は以下フォーマットを返します。
+```jsonc
+{
+  "ok": false,
+  "error": { "tool": "<toolName>", "code": "<ERROR_CODE>", "message": "...", "hint": "...", "issues": [ { "path": [..], "message": "..." } ] }
+}
+```
+ERROR_CODE 一覧:
+| Code | 説明 | 代表的発生条件 | クライアント推奨対処 |
+|------|------|----------------|-----------------------|
+| MISSING_PARAMETER | 必須引数欠如 | `'<param>' is required` | 送信ペイロードへ追加 |
+| NOT_FOUND | 対象リソースなし | 無効 fileId | list/find で再取得 |
+| VALIDATION_ERROR | スキーマ/コンパイル失敗 | Zod/DSL 変換失敗 | issues を利用し再生成 |
+| INPUT_FORMAT_ERROR | 軽度入力フォーマット誤り | 音名 typo など | 入力正規化/再入力 |
+| LIMIT_EXCEEDED | 制限超過 | サイズ/件数超過 | 分割し append で送る |
+| DEVICE_UNAVAILABLE | 出力不可 | node-midi 未ロード | dryRun モードへフォールバック |
+| INTERNAL_ERROR | 想定外例外 | 予期しない throw | ログ採取 & 再送（再発時報告） |
+
+備考:
+- `issues` は Zod の `issues` を `{ path, message }` に縮約したもの。
+- message には内部詳細を過剰に含めない（セキュリティ・ノイズ対策）。
+- 追加予定: CHANNEL_RANGE_ERROR / TICK_RANGE_ERROR / RATE_LIMITED など。

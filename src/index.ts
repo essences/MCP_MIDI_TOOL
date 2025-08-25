@@ -52,6 +52,35 @@ async function main() {
         },
       ],
     });
+    // エラー分類（メッセージ/例外内容からコードとヒントを推定）
+    const classifyError = (tool: string, err: any): { code: string; message: string; hint?: string; issues?: any[] } => {
+      const rawMsg = (err?.message || String(err) || "").trim();
+      const lower = rawMsg.toLowerCase();
+      let code = "INTERNAL_ERROR";
+      let hint: string | undefined;
+      // 簡易的に Zod 風 issue 配列を抽出（err.issues があれば利用）
+      const issues: any[] | undefined = Array.isArray(err?.issues) ? err.issues.map((i: any) => ({ path: i.path, message: i.message })) : undefined;
+      if (/not found/i.test(rawMsg)) {
+        code = "NOT_FOUND";
+        if (lower.includes("fileid")) hint = "有効な fileId を list_midi や json_to_smf の結果から指定してください";
+      } else if (/required/.test(lower)) {
+        code = "MISSING_PARAMETER";
+        const m = rawMsg.match(/'(\w+)' is required/i); if (m) hint = `パラメータ ${m[1]} を arguments に追加してください`;
+      } else if (/validation failed|compile failed|json validation failed/.test(lower)) {
+        code = "VALIDATION_ERROR";
+        hint = "入力JSON/Score DSL のスキーマを README と docs/specs を参照して修正してください (format指定推奨)";
+      } else if (/invalid note name|unsupported note item|invalid json/i.test(lower)) {
+        code = "INPUT_FORMAT_ERROR";
+        hint = "音名表記やJSON構造を再確認してください (例: C4, F#3, Bb5)";
+      } else if (/size exceeds|too large|exceeds/i.test(lower)) {
+        code = "LIMIT_EXCEEDED";
+        hint = "データサイズを削減するか分割して append_to_smf を利用してください";
+      } else if (/node-midi not available/i.test(lower)) {
+        code = "DEVICE_UNAVAILABLE";
+        hint = "出力デバイス利用不可。macOS/IAC かサポート環境で再試行、または dryRun を使用";
+      }
+      return { code, message: rawMsg, hint, ...(issues ? { issues } : {}) };
+    };
     // Claude Desktop からの tools/list / resources/list / prompts/list への応答
     if (request.method === "tools/list") {
   const tools: any[] = [
@@ -119,8 +148,9 @@ async function main() {
       throw new Error("Prompt not found");
     }
 
-    if (request.method !== "tools/call") return undefined;
-    const { name, arguments: args } = request.params as { name: string; arguments?: any };
+  if (request.method !== "tools/call") return undefined;
+  const { name, arguments: args } = request.params as { name: string; arguments?: any };
+  try {
     // 便利: 音名→MIDI番号（簡易）
     function nameToMidiLocal(s: string): number | undefined {
       const m = /^([A-Ga-g])([#b]?)(-?\d+)$/.exec(String(s).trim());
@@ -1104,6 +1134,11 @@ async function main() {
     }
 
     throw new Error(`Tool ${name} not found`);
+    } catch (err: any) {
+      // 例外をクライアントに伝達可能な構造化エラーへ変換
+      const classified = classifyError(name, err);
+      return wrap({ ok: false, error: { tool: name, ...classified } });
+    }
   };
 
   await server.connect(transport);
