@@ -64,6 +64,38 @@ JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-co
 
 注: 上記は Score DSL v1 の構造例です。実際に `json_to_smf` ツールへ渡す場合は `format: "score_dsl_v1"` を指定してください（下のツール呼び出し例を参照）。
 詳細は `docs/specs/score_dsl_v1.md` を参照。
+#### 自動CC付与プリセット (meta.autoCcPresets)
+Score DSL → JSON MIDI コンパイル時に、演奏表現を補助するCCイベントを自動生成できます（オプション）。
+
+| プリセットID | 目的 | 生成CC | ロジック概要 |
+|--------------|------|--------|--------------|
+| `sustain_from_slur` | スラー/レガート区間のペダル保持 | CC64 127→0 | `slur:true` または `articulation:"legato"` が連続するノート群を一括区間化し開始/終了に ON/OFF |
+| `crescendo_to_expression` | ダイナミクス段階変化の滑らかな音量フェード | CC11 ランプ | ノートの `dynamic` (pp,p,mp,mf,f,ff) の変化点を端点に線形補間。過剰イベント防止のため約 ppq/4 刻みサンプリング |
+
+使用例:
+```jsonc
+{
+   "ppq":480,
+   "meta": {
+      "timeSignature": { "numerator":4, "denominator":4 },
+      "keySignature": { "root":"C", "mode":"major" },
+      "tempo": { "bpm":120 },
+      "autoCcPresets": [ { "id": "sustain_from_slur" }, { "id": "crescendo_to_expression" } ]
+   },
+   "tracks": [
+      { "channel":1, "program":0, "events":[
+         { "type":"note", "note":"C4", "start":{ "bar":1, "beat":1 }, "duration":{ "value":"1/4" }, "slur": true, "dynamic":"mp" },
+         { "type":"note", "note":"D4", "start":{ "bar":1, "beat":2 }, "duration":{ "value":"1/4" }, "articulation":"legato", "dynamic":"mf" },
+         { "type":"note", "note":"E4", "start":{ "bar":1, "beat":3 }, "duration":{ "value":"1/4" }, "dynamic":"f" }
+      ] }
+   ]
+}
+```
+補足:
+- プリセットは副作用的にCCイベントを挿入するのみで既存ノートを改変しません。
+- 手動で `insert_cc` など後処理を行う場合は二重にならないよう CC 番号 (64/11) の重複を確認してください。
+- 将来的に曲線種別（指数/S字）や粒度調整オプションを追加予定です。
+
 ### 対応イベント一覧（現状）
 - ノート: note（ON/OFF、velocity、durationTicks）
    - ピッチ指定は2通り: `pitch`(0..127) または `note`(音名: C4, F#3, Bb5 等)。SMF→JSONでは両方が付与されます。
@@ -223,6 +255,62 @@ play_smf（dryRun→実再生）:
 { "tool":"play_smf", "arguments": { "fileId":"<from-json_to_smf>", "dryRun": true } }
 { "tool":"play_smf", "arguments": { "fileId":"<from-json_to_smf>", "portName":"IAC", "schedulerLookaheadMs":200, "schedulerTickMs":20 } }
 ```
+
+### エンドツーエンド例（Score DSL → SMF → 追記 → CC自動/手動 → 再生）
+以下は小さなフレーズを Score DSL で作成し、SMF 化 → 末尾にフレーズ追記 → Expression カーブを自動付与（`crescendo_to_expression`）しつつ、更に任意CCで強調 → dryRun 解析 → 実再生 までの一連例です。
+
+1. 初期スコア（crescendoプリセット付き）を `json_to_smf`:
+```jsonc
+{ "tool":"json_to_smf", "arguments": {
+   "json": {
+      "ppq":480,
+      "meta": { "timeSignature": { "numerator":4,"denominator":4 }, "tempo": { "bpm":120 }, "autoCcPresets":[ { "id":"crescendo_to_expression" } ] },
+      "tracks": [ { "channel":1, "program":0, "events":[
+         { "type":"note","note":"C4","start":{"bar":1,"beat":1},"duration":{"value":"1/4"},"dynamic":"mp"},
+         { "type":"note","note":"D4","start":{"bar":1,"beat":2},"duration":{"value":"1/4"},"dynamic":"mf"},
+         { "type":"note","note":"E4","start":{"bar":1,"beat":3},"duration":{"value":"1/4"},"dynamic":"f"}
+      ] } ]
+   },
+   "format":"score_dsl_v1",
+   "name":"phrase1.mid"
+} }
+```
+2. 別フレーズを Score DSL で末尾追記 (`append_to_smf` + `atEnd:true` + `gapTicks`):
+```jsonc
+{ "tool":"append_to_smf", "arguments": {
+   "fileId":"<phrase1-fileId>",
+   "json": { "ppq":480, "meta": { "timeSignature": { "numerator":4, "denominator":4 }, "tempo": { "bpm":120 } }, "tracks":[ { "channel":1, "program":0, "events":[ { "type":"note","note":"G4","start":{"bar":1,"beat":1},"duration":{"value":"1/2"}, "dynamic":"mf" } ] } ] },
+   "format":"score_dsl_v1",
+   "atEnd":true,
+   "gapTicks":240
+} }
+```
+3. 追加で任意CC（例: CC11で軽いブースト区間 2小節目開始～2小節目終わり）を `insert_cc`:
+```jsonc
+{ "tool":"insert_cc", "arguments": {
+   "fileId":"<resulting-fileId>",
+   "controller":11,
+   "ranges":[ { "startTick": 480*4, "endTick": 480*8, "valueOn":100, "valueOff":70 } ]
+} }
+```
+4. 安全確認 （dryRun解析）:
+```jsonc
+{ "tool":"play_smf", "arguments": { "fileId":"<file-after-cc>", "dryRun": true } }
+```
+    - `scheduledEvents` と `totalDurationMs` を確認し過剰イベントでないか判断。
+5. 実再生:
+```jsonc
+{ "tool":"play_smf", "arguments": { "fileId":"<file-after-cc>", "portName":"IAC" } }
+```
+6. 進捗監視と停止:
+```jsonc
+{ "tool":"get_playback_status", "arguments": { "playbackId":"<id>" } }
+{ "tool":"stop_playback", "arguments": { "playbackId":"<id>" } }
+```
+ポイント:
+- 自動付与 (autoCcPresets) と手動挿入 (insert_cc) を組み合わせて段階＋滑らかな変化を作れる。
+- 大編成/長尺ではこの手順を小刻みに繰り返し、常に `dryRun` でメトリクスを把握してから再生。
+
 
 ## ディレクトリ
 - `src/` MCPサーバ本体（stdio）
