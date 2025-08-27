@@ -125,6 +125,9 @@ Score DSL → JSON MIDI コンパイル時に、演奏表現を補助するCCイ
 - find_midi: 名前の部分一致検索
 - get_playback_status: 再生進捗の取得（cursor/lastSentAt/総尺など）
 - trigger_notes: 単発でノート（単音/和音）を即送出（耳トレ/聴音ワンショット）
+- start_single_capture: 単発(単音/和音)リアルタイムキャプチャ開始（onsetWindow内ノートを和音化）
+- feed_single_capture: （テスト/擬似入力用）キャプチャ中セッションへノートON/OFFイベント投入
+- get_single_capture_status: キャプチャ進捗/完了結果取得（reason, result を含む）
 
 戻り値はClaude互換の`content: [{type:'text', text: ...}]`を含みます。
 
@@ -152,6 +155,102 @@ Score DSL → JSON MIDI コンパイル時に、演奏表現を補助するCCイ
    - 入力: `{ notes: (string[]|number[]), velocity?: number(1-127)=100, durationMs?: number(20-10000)=500, channel?: number(1-16)=1, program?: number(0-127), portName?: string, transpose?: number, dryRun?: boolean }`（外部表記。内部では 0〜15 にマップ）
    - 出力: `{ playbackId, scheduledNotes, durationMs, portName? }`（dryRun時は即done相当）
    - 例: `{ tool:"trigger_notes", arguments:{ notes:["C4","E4","G4"], velocity:96, durationMs:200, portName:"IAC" } }`
+
+#### 単発リアルタイムキャプチャ (single capture)
+和音あるいは単音を「最初のNoteOn発生から onsetWindowMs 以内」にまとめて 1 つの結果として返す軽量キャプチャ。全ノートOff後のサイレンス、または maxWaitMs 経過で確定。
+
+2025-08 現在: 2系統の入力をサポート
+- 擬似イベント: `feed_single_capture` （テスト/自動化用）
+- 実デバイス: `start_device_single_capture` （`list_input_devices` でポート名を取得して指定）
+
+コントラクト（成功時 / 擬似入力）:
+```
+start_single_capture -> { captureId, onsetWindowMs, silenceMs, maxWaitMs }
+feed_single_capture(captureId, events[]) -> { ok:true, captureId, done:boolean }
+get_single_capture_status(captureId) -> {
+   ok:true,
+   captureId,
+   done:boolean,
+   reason?: 'completed' | 'timeout',
+   result?: { notes:number[], velocities:number[], durationMs:number, isChord:boolean }
+}
+```
+デバイス版追加ツール:
+```
+list_input_devices -> { ok:true, devices:[ { index, name } ... ] }
+start_device_single_capture { portName?, onsetWindowMs?, silenceMs?, maxWaitMs? } -> { captureId, portName, mode:'device', onsetWindowMs, silenceMs, maxWaitMs }
+get_single_capture_status { captureId } -> （共通）
+```
+
+主要パラメータ（共通）:
+- onsetWindowMs (10–500 推奨既定80): 最初のNoteOnから同一和音として受理する追加NoteOnの時間窓
+- silenceMs (>=50): 全ノートOff後に確定する無音保持時間
+- maxWaitMs (>=200): キャプチャ開始からの最大全体待ち時間（NoteOn未発生でも timeout）
+
+feed_single_capture の events 形式:
+```
+{ kind:'on'|'off', note: <0-127>, velocity?:1-127, at: <capture開始基準ms> }
+```
+ルール:
+- onsetWindow超過の追加NoteOnは無視
+- 無効ノート/負値/範囲外はエラー
+- 完了後の feed は ignored 扱い
+
+使用例（和音キャプチャ → 結果取得：擬似イベント）:
+```jsonc
+// 1) start
+{ "tool":"start_single_capture", "arguments": { "onsetWindowMs":80, "silenceMs":150, "maxWaitMs":3000 } }
+// <- { captureId }
+
+// 2) feed (C,E,G triad)
+{ "tool":"feed_single_capture", "arguments": { "captureId":"<id>", "events":[
+   {"kind":"on","note":60,"velocity":100,"at":10},
+   {"kind":"on","note":64,"velocity":102,"at":30},
+   {"kind":"on","note":67,"velocity":98,"at":55},
+   {"kind":"off","note":60,"at":300},
+   {"kind":"off","note":64,"at":305},
+   {"kind":"off","note":67,"at":310}
+] } }
+
+// 3) 約500ms後 status
+{ "tool":"get_single_capture_status", "arguments": { "captureId":"<id>" } }
+// -> done:true, reason:'completed', result.notes:[60,64,67]
+```
+
+デバイス使用例（IACバスを自動選択または部分一致）:
+```jsonc
+// 1) 入力ポート列挙
+{ "tool":"list_input_devices", "arguments":{} }
+// <- { devices:[ {"index":0, "name":"IAC Driver Bus 1"}, ... ] }
+
+// 2) キャプチャ開始（portName 省略で 0 番候補 / IAC / virtual / network 優先）
+{ "tool":"start_device_single_capture", "arguments": { "portName":"IAC", "onsetWindowMs":90, "silenceMs":150, "maxWaitMs":4000 } }
+// <- { captureId, portName:"IAC Driver Bus 1", mode:"device" }
+
+// 3) MIDIキーボードで和音を弾く → 全ノート離して silence 経過
+{ "tool":"get_single_capture_status", "arguments": { "captureId":"<id>" } }
+// -> done:true, reason:'completed', result.notes:[60,64,67]
+```
+
+タイムアウト例（無入力 / 擬似 or デバイス）:
+```jsonc
+{ "tool":"start_single_capture", "arguments": { "maxWaitMs":400 } }
+// 500ms後 status
+{ "tool":"get_single_capture_status", "arguments": { "captureId":"<id>" } }
+// -> reason:'timeout', result.notes:[]
+```
+```
+```jsonc
+{ "tool":"start_single_capture", "arguments": { "maxWaitMs":400 } }
+// 500ms後 status
+{ "tool":"get_single_capture_status", "arguments": { "captureId":"<id>" } }
+// -> reason:'timeout', result.notes:[]
+```
+エッジ/確認ポイント:
+- done:false の間は reason 未設定
+- result は完了後イミュータブル
+- durationMs は和音最初のNoteOnから最終Off相対
+
 
 ### JSONイベント仕様（抜粋）
 - note: `{ type:"note", tick, pitch(0-127), velocity(1-127), duration>=1, channel? }`
@@ -404,6 +503,7 @@ play_smf（dryRun→実再生）:
 - LIMIT_EXCEEDED: サイズ上限超過等
 - DEVICE_UNAVAILABLE: node-midi 等デバイス未利用可能
 - INTERNAL_ERROR: 想定外例外（Stackはログにのみ出力推奨）
+（single capture 補足: reason は 'completed' か 'timeout' の2値。timeout は maxWaitMs 超過発生）
 
 クライアント実装指針:
 1. ok===false → error.code で分岐
