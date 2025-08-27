@@ -59,7 +59,8 @@ describe("json_to_smf with format=json_midi_v1", () => {
     const bad = { foo: 1 };
     sendLine(child, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "json_to_smf", arguments: { json: bad, format: "json_midi_v1" } } });
     const res = await readLine(child);
-    expect(res.error?.message).toMatch(/json_midi_v1 validation failed/i);
+  // ツールラップ形式: result.error.message に格納
+  expect(res.result?.error?.message).toMatch(/json_midi_v1 validation failed/i);
     child.kill();
   }, 15000);
 });

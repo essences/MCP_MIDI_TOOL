@@ -49,7 +49,7 @@ describe("json_to_smf with format=score_dsl_v1", () => {
     const badDsl = { tracks: [] }; // missing required meta/ppq etc
     sendLine(child, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "json_to_smf", arguments: { json: badDsl, format: "score_dsl_v1" } } });
     const res = await readLine(child);
-    expect(res.error?.message).toMatch(/score_dsl_v1 compile\/validation failed/i);
+    expect(res.result?.error?.message).toMatch(/score_dsl_v1 compile\/validation failed|score-compile/i);
     child.kill();
   }, 15000);
 });

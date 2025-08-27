@@ -9,18 +9,22 @@ import { encodeToSmfBinary } from "./jsonToSmf.js";
 import { decodeSmfToJson } from "./smfToJson.js";
 import { compileScoreToJsonMidi } from "./scoreToJsonMidi.js";
 // CoreMIDI (node-midi) は動的 import（macOS以外やCIでの存在を許容）
+// node-midi (Input/Output) を遅延ロード（CI/環境未対応時は null を許容）
 let MidiOutput: any = null;
+let MidiInput: any = null;
 async function loadMidi() {
-  if (MidiOutput) return MidiOutput;
+  if (MidiOutput || MidiInput) return { MidiOutput, MidiInput };
   try {
     const mod: any = await import('midi');
-    // ESM/CJS どちらの形でも Output を解決
+    // ESM/CJS どちらの形でもクラス解決
     const Out = mod?.Output || mod?.default?.Output;
+    const In = mod?.Input || mod?.default?.Input;
     MidiOutput = typeof Out === 'function' ? Out : null;
+    MidiInput = typeof In === 'function' ? In : null;
   } catch {
-    MidiOutput = null;
+    MidiOutput = null; MidiInput = null;
   }
-  return MidiOutput;
+  return { MidiOutput, MidiInput };
 }
 
 // 同一プロセス内の直近保存レコードのインメモリ索引（テストの並列実行耐性向上のため）
@@ -60,15 +64,15 @@ async function main() {
       let hint: string | undefined;
       // 簡易的に Zod 風 issue 配列を抽出（err.issues があれば利用）
       const issues: any[] | undefined = Array.isArray(err?.issues) ? err.issues.map((i: any) => ({ path: i.path, message: i.message })) : undefined;
-      if (/not found/i.test(rawMsg)) {
+      if (/validation failed|compile failed|json validation failed/.test(lower)) {
+        code = "VALIDATION_ERROR";
+        hint = "入力JSON/Score DSL のスキーマを README と docs/specs を参照して修正してください (format指定推奨)";
+      } else if (/not found/i.test(rawMsg)) {
         code = "NOT_FOUND";
         if (lower.includes("fileid")) hint = "有効な fileId を list_midi や json_to_smf の結果から指定してください";
       } else if (/required/.test(lower)) {
         code = "MISSING_PARAMETER";
         const m = rawMsg.match(/'(\w+)' is required/i); if (m) hint = `パラメータ ${m[1]} を arguments に追加してください`;
-      } else if (/validation failed|compile failed|json validation failed/.test(lower)) {
-        code = "VALIDATION_ERROR";
-        hint = "入力JSON/Score DSL のスキーマを README と docs/specs を参照して修正してください (format指定推奨)";
       } else if (/invalid note name|unsupported note item|invalid json/i.test(lower)) {
         code = "INPUT_FORMAT_ERROR";
         hint = "音名表記やJSON構造を再確認してください (例: C4, F#3, Bb5)";
@@ -98,6 +102,11 @@ async function main() {
   { name: "get_playback_status", description: "再生ステータスを取得（進捗・総尺・デバイスなど）", inputSchema: { type: "object", properties: { playbackId: { type: "string" } }, required: ["playbackId"] } },
   { name: "playback_midi", description: "MIDI再生開始（PoC: durationMsで長さ指定可）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" }, durationMs: { type: "number" } }, required: ["fileId"] } },
     { name: "trigger_notes", description: "単発でノート（単音/和音）を即時送出（耳トレ用・高速ワンショット）", inputSchema: { type: "object", properties: { notes: { anyOf: [ { type: "array", items: { type: "string" } }, { type: "array", items: { type: "number" } } ] }, velocity: { type: "number" }, durationMs: { type: "number" }, channel: { type: "number" }, program: { type: "number" }, portName: { type: "string" }, transpose: { type: "number" }, dryRun: { type: "boolean" } }, required: ["notes"] } },
+  { name: "list_input_devices", description: "MIDI入力デバイス一覧（暫定）", inputSchema: { type: "object", properties: {} } },
+  { name: "start_device_single_capture", description: "MIDI入力デバイスから単発(単音/和音)キャプチャ開始 (onsetWindow内で和音判定)", inputSchema: { type: "object", properties: { portName: { type: "string" }, onsetWindowMs: { type: "number" }, silenceMs: { type: "number" }, maxWaitMs: { type: "number" } } } },
+  { name: "start_single_capture", description: "リアルタイム単発(単音/和音)キャプチャ開始 (onsetWindow内を和音と判定)", inputSchema: { type: "object", properties: { onsetWindowMs: { type: "number" }, silenceMs: { type: "number" }, maxWaitMs: { type: "number" } } } },
+  { name: "feed_single_capture", description: "(テスト/内部) start_single_capture中の擬似MIDIイベント投入", inputSchema: { type: "object", properties: { captureId: { type: "string" }, events: { type: "array", items: { type: "object", properties: { kind: { type: "string", enum: ["on","off"] }, note: { type: "number" }, velocity: { type: "number" }, at: { type: "number" } }, required: ["kind","note","at"] } } }, required: ["captureId","events"] } },
+  { name: "get_single_capture_status", description: "単発キャプチャ状態取得(完了時に結果返却)", inputSchema: { type: "object", properties: { captureId: { type: "string" } }, required: ["captureId"] } },
         { name: "stop_playback", description: "playbackIdを停止", inputSchema: { type: "object", properties: { playbackId: { type: "string" } }, required: ["playbackId"] } },
         { name: "find_midi", description: "名前でMIDIを検索（部分一致）", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }
       ];
@@ -111,6 +120,7 @@ async function main() {
       const prompts = [
         { name: "score_dsl_quick_ref", description: "Score DSL v1の注意点（beatは整数、unit/offset、未対応articulation）" },
         { name: "trigger_notes_test_v9", description: "trigger_notes 検証用の手順（v9）" },
+  { name: "single_capture_test_v1", description: "start_single_capture / feed / status / timeout の検証手順" },
       ];
       return { prompts } as any;
     }
@@ -144,6 +154,33 @@ async function main() {
           "詳細: docs/prompts/claude_test_prompts_v9_trigger_notes.md を参照",
         ].join("\n");
         return { prompt: { name, description: "trigger_notes v9 テスト要約", messages: [ { role: "user", content: [ { type: "text", text } ] } ] } } as any;
+      }
+      if (name === "single_capture_test_v1") {
+        const text = [
+          "single_capture v1 テスト手順:",
+          "前提: start_single_capture / feed_single_capture / get_single_capture_status ツールが tools/list に出現すること。",
+          "",
+          "1. キャプチャ開始 (和音想定)",
+          "   tools/call:start_single_capture { onsetWindowMs:80, silenceMs:150, maxWaitMs:3000 }",
+          "   → captureId を取得",
+          "2. 疑似イベント投入 (同一和音): feed_single_capture events = on(60@10), on(64@25), on(67@55), off 群(300,305,310)",
+          "3. 約500ms 待機後 get_single_capture_status { captureId } → done=true, reason=completed, notes=[60,64,67], isChord=true 確認",
+          "4. onsetWindow外ノート無視: 新規 start → feed: on(60@5), off(60@150), on(64@200), off(64@260) → 300ms後 status → notes=[60], isChord=false",
+          "5. タイムアウト: start_single_capture { maxWaitMs:400 } → 500ms待機 → status → reason=timeout, notes=[]",
+          "6. エッジ: feed_single_capture で無効note (-1 や 200) 送出 → エラー (invalid note) 期待",
+          "7. 進行中ポーリング: (和音ケースで) 100ms時点 status → done=false で reason 未設定",
+          "8. 再取得: 完了後に再度 status → 同一 result が安定して返ること",
+          "",
+          "参考JSON例 (手動送信時):",
+          "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"start_single_capture\",\"arguments\":{\"onsetWindowMs\":80,\"silenceMs\":150,\"maxWaitMs\":3000}}}",
+          "",
+          "品質観点:",
+          "- onsetWindow 超過ノートは無視され result に含まれない",
+          "- timeout 時 result.notes 空, durationMs=0 近傍 (現実装は0以上)",
+          "- reason='completed'|'timeout' 以外は出ない",
+          "- 再取得で状態変化しない (イミュータブル結果)",
+        ].join("\n");
+        return { prompt: { name, description: "single_capture v1 テスト手順", messages: [ { role: "user", content: [ { type: "text", text } ] } ] } } as any;
       }
       throw new Error("Prompt not found");
     }
@@ -203,11 +240,11 @@ async function main() {
       // 実送出
       let portNameResolved: string | undefined;
       try {
-        const Out = await loadMidi();
-        if (!Out) {
+        const { MidiOutput: OutCls } = await loadMidi();
+        if (!OutCls) {
           warnings.push('node-midi not available: trigger is a no-op');
         } else {
-          const out = new Out();
+          const out = new OutCls();
           const ports = out.getPortCount?.() ?? 0;
           let target = 0;
           const pickByHint = (o:any, hint:string) => {
@@ -425,6 +462,12 @@ async function main() {
       let chunk = args?.json;
       if (typeof chunk === 'string') { try { chunk = JSON.parse(chunk); } catch {} }
       if (!chunk) throw new Error("'json' is required for append_to_smf");
+      // 簡易形式サポート: { events:[...] } だけを渡された場合は単一トラックJSON MIDIにラップ
+      if (chunk && !chunk.tracks && Array.isArray(chunk.events)) {
+        const evs = chunk.events;
+        // baseJson まだ未読なので ppq は既定 480 にフォールバック
+        chunk = { ppq: 480, tracks: [ { channel: Number.isFinite(Number(chunk.channel)) ? chunk.channel : undefined, events: evs } ] };
+      }
 
       // 1) 既存SMFをJSONへ
       const absPath = path.resolve(resolveBaseDir(), item.path);
@@ -528,6 +571,218 @@ async function main() {
         inMemoryIndex.set(newId, rec);
         return wrap({ ok: true, fileId: newId, name: nameWithExt, path: relPath, bytes, insertedAtTick: insertTick });
       }
+    }
+
+    // --- 単発キャプチャ管理 ---------------------------------------------
+    type CaptureState = {
+      id: string;
+      startedAt: number; // epoch ms
+      onsetWindowMs: number;
+      silenceMs: number;
+      maxWaitMs: number;
+      originMs?: number; // 最初のNoteOn(=和音起点)
+      lastEventAt?: number; // 相対ms (origin基準ではなく capture開始基準)
+      notes: Map<number, { onAt: number; offAt?: number; velocity: number }>;
+      done: boolean;
+      reason?: 'completed' | 'timeout';
+      result?: any;
+      // デバイスキャプチャ用
+      inputInstance?: any; // node-midi Input
+      inputPortName?: string;
+  finalizeOnRelease?: boolean; // 全ノートOff時に即確定（silenceMs待機をスキップ）
+    };
+    const captureRegistry: Map<string, CaptureState> = (globalThis as any).__singleCaptures = (globalThis as any).__singleCaptures || new Map();
+
+    function finalizeCapture(st: CaptureState, reason: 'completed' | 'timeout' = 'completed') {
+      if (st.done) return;
+      st.done = true;
+      st.reason = reason;
+      // まだオフになっていないノートは lastEventAt か maxWaitMs 終了時点でオフ扱い
+      const endRel = (()=>{
+        let latest = 0;
+        for (const v of st.notes.values()) {
+          const off = (v.offAt !== undefined ? v.offAt : (st.lastEventAt ?? 0));
+          if (off > latest) latest = off;
+        }
+        return latest;
+      })();
+      // 結果整形
+      const entries = Array.from(st.notes.entries()).map(([n,v])=>({ note: n, onAt: v.onAt, offAt: v.offAt ?? endRel, velocity: v.velocity }));
+      entries.sort((a,b)=> a.note - b.note);
+      const notes = entries.map(e=> e.note);
+      const velocities = entries.map(e=> e.velocity);
+      const startRel = st.originMs !== undefined ? (st.originMs - st.startedAt) : 0;
+      const durationMs = endRel - (st.originMs !== undefined ? (st.originMs - st.startedAt) : 0);
+      st.result = { notes, velocities, durationMs: Math.max(0,durationMs), isChord: notes.length > 1 };
+    }
+
+    function maybeAutoFinalize(st: CaptureState) {
+      if (st.done) return;
+      const nowMs = Date.now();
+      const elapsedSinceStart = nowMs - st.startedAt;
+      if (elapsedSinceStart >= st.maxWaitMs) {
+        // 期待仕様: 既にノートが発生し全ノートOff状態なら 'completed' 扱い。未入力または入力途中なら 'timeout'
+        if (st.originMs) {
+          const anyActiveLate = Array.from(st.notes.values()).some(v=> v.offAt === undefined);
+            if (!anyActiveLate) { finalizeCapture(st, 'completed'); return; }
+        }
+        finalizeCapture(st, 'timeout'); return;
+      }
+      if (!st.originMs) return; // まだ最初のon無しだが maxWaitMs は既に上で判定済
+      // 全ノートoff & サイレンス経過
+      const anyActive = Array.from(st.notes.values()).some(v=> v.offAt === undefined);
+      if (!anyActive) {
+        if (st.finalizeOnRelease) {
+          finalizeCapture(st, 'completed');
+        } else {
+          const lastOff = Math.max(...Array.from(st.notes.values()).map(v=> v.offAt ?? 0), 0);
+          if ((elapsedSinceStart - lastOff) >= st.silenceMs) finalizeCapture(st, 'completed');
+        }
+      }
+    }
+
+    if (name === 'start_single_capture') {
+      const onsetWindowMs = Number.isFinite(Number(args?.onsetWindowMs)) ? Math.max(10, Math.min(500, Number(args.onsetWindowMs))) : 80;
+      const silenceMs = Number.isFinite(Number(args?.silenceMs)) ? Math.max(50, Math.min(2000, Number(args.silenceMs))) : 150;
+      const maxWaitMs = Number.isFinite(Number(args?.maxWaitMs)) ? Math.max(200, Math.min(10000, Number(args.maxWaitMs))) : 3000;
+      const finalizeOnRelease = !!args?.finalizeOnRelease;
+      const id = randomUUID();
+      const st: CaptureState = { id, startedAt: Date.now(), onsetWindowMs, silenceMs, maxWaitMs, notes: new Map(), done: false, finalizeOnRelease };
+      captureRegistry.set(id, st);
+  return wrap({ ok: true, captureId: id, onsetWindowMs, silenceMs, maxWaitMs, finalizeOnRelease }) as any;
+    }
+
+    // --- MIDI入力デバイス列挙 ---
+    if (name === 'list_input_devices') {
+      await loadMidi();
+      if (!MidiInput) throw new Error('node-midi not available for input');
+      const inp = new MidiInput();
+      const count = typeof inp.getPortCount === 'function' ? inp.getPortCount() : 0;
+      const devices: Array<{ index: number; name: string }> = [];
+      for (let i=0;i<count;i++) {
+        let nm = '';
+        try { nm = inp.getPortName(i) || `input:${i}`; } catch { nm = `input:${i}`; }
+        devices.push({ index:i, name: nm });
+      }
+      try { if (typeof inp.closePort === 'function') inp.closePort(); } catch {}
+      return wrap({ ok: true, devices }) as any;
+    }
+
+    // --- デバイスからの単発キャプチャ開始 ---
+    if (name === 'start_device_single_capture') {
+      await loadMidi();
+      if (!MidiInput) throw new Error('node-midi not available for input');
+      const onsetWindowMs = Number.isFinite(Number(args?.onsetWindowMs)) ? Math.max(10, Math.min(500, Number(args.onsetWindowMs))) : 80;
+      const silenceMs = Number.isFinite(Number(args?.silenceMs)) ? Math.max(50, Math.min(2000, Number(args.silenceMs))) : 150;
+      const maxWaitMs = Number.isFinite(Number(args?.maxWaitMs)) ? Math.max(200, Math.min(10000, Number(args.maxWaitMs))) : 3000;
+      const finalizeOnRelease = !!args?.finalizeOnRelease;
+      const reqPortName: string | undefined = args?.portName;
+      // 列挙しターゲットポートを決定
+      const temp = new MidiInput();
+      const count = typeof temp.getPortCount === 'function' ? temp.getPortCount() : 0;
+      const ports: string[] = [];
+      for (let i=0;i<count;i++) { try { ports.push(temp.getPortName(i) || `input:${i}`); } catch { ports.push(`input:${i}`); } }
+      let index = 0;
+      if (reqPortName) {
+        const found = ports.findIndex(p=> p === reqPortName || p.includes(reqPortName));
+        if (found >= 0) index = found; else throw new Error(`input port not found: ${reqPortName}`);
+      }
+      // 実インスタンスを利用 (temp をそのまま使うと closePort タイミングが煩雑なので再利用)
+      const inp = temp; // reuse
+      try { inp.openPort(index); } catch { try { inp.closePort(); } catch {}; throw new Error(`failed to open input port index=${index}`); }
+      // システムリアルタイム/アクティブセンシング無視 (APIによっては ignoreTypes が存在)
+      try { if (typeof inp.ignoreTypes === 'function') inp.ignoreTypes(false, false, false); } catch {}
+
+      const id = randomUUID();
+  const st: CaptureState = { id, startedAt: Date.now(), onsetWindowMs, silenceMs, maxWaitMs, notes: new Map(), done: false, inputInstance: inp, inputPortName: ports[index], finalizeOnRelease };
+      captureRegistry.set(id, st);
+
+      // メッセージハンドラ
+      const handler = (delta: number, message: number[]) => {
+        try {
+          const status = message[0] | 0;
+          const type = status & 0xF0;
+            const note = message[1] | 0;
+            const velocity = message[2] | 0;
+            const at = Date.now() - st.startedAt; // relative ms
+            if (type === 0x90 && velocity > 0) {
+              if (!st.originMs) st.originMs = st.startedAt + at;
+              const within = (st.startedAt + at - (st.originMs)) <= st.onsetWindowMs;
+              if (within) {
+                if (!st.notes.has(note)) st.notes.set(note, { onAt: at, velocity: Math.max(1, Math.min(127, velocity)) });
+              } else {
+                // onsetWindow外は無視（単発設計）
+              }
+              st.lastEventAt = at;
+            } else if (type === 0x80 || (type === 0x90 && velocity === 0)) {
+              const entry = st.notes.get(note);
+              if (entry && entry.offAt === undefined) entry.offAt = at;
+              st.lastEventAt = at;
+            }
+            maybeAutoFinalize(st);
+            if (st.done) {
+              // 完了したらポートを閉じイベントを解除
+              try { if (typeof inp.closePort === 'function') inp.closePort(); } catch {}
+            }
+        } catch {
+          // 例外は握りつぶし（キャプチャ継続）。致命的状況ではクライアントポーリングで timeout/結果取得可能。
+        }
+      };
+      try { inp.on('message', handler); } catch { /* 一部実装差異 */ }
+
+  return wrap({ ok: true, captureId: id, portName: ports[index], onsetWindowMs, silenceMs, maxWaitMs, finalizeOnRelease, mode: 'device' }) as any;
+    }
+
+    if (name === 'feed_single_capture') {
+      const captureId: string | undefined = args?.captureId;
+      const events: any[] | undefined = args?.events;
+      if (!captureId) throw new Error("'captureId' is required for feed_single_capture");
+      if (!Array.isArray(events) || events.length === 0) throw new Error("'events' must be non-empty array");
+      const st = captureRegistry.get(captureId);
+      if (!st) throw new Error(`captureId not found: ${captureId}`);
+      if (st.done) return wrap({ ok: true, captureId, done: true, ignored: true }) as any;
+      const base = st.startedAt;
+      for (const ev of events) {
+        const kind = ev?.kind;
+        const note = Number(ev?.note);
+        const velRaw = Number(ev?.velocity);
+        const at = Number(ev?.at);
+        if (!Number.isFinite(note) || note < 0 || note > 127) throw new Error(`invalid note: ${ev?.note}`);
+        if (!Number.isFinite(at) || at < 0) throw new Error(`invalid at ms: ${ev?.at}`);
+        const atAbs = base + at; // absolute ms
+        if (kind === 'on') {
+          if (!st.originMs) st.originMs = atAbs;
+          // onsetWindow内→和音メンバ
+          const within = (atAbs - st.originMs) <= st.onsetWindowMs;
+          if (within) {
+            if (!st.notes.has(note)) st.notes.set(note, { onAt: at, velocity: Number.isFinite(velRaw)? Math.max(1, Math.min(127, velRaw)) : 100 });
+          } else {
+            // onsetWindow超過の新しいNoteOnは無視（単発キャプチャ設計）
+          }
+          st.lastEventAt = at;
+        } else if (kind === 'off') {
+          const entry = st.notes.get(note);
+          if (entry && entry.offAt === undefined) {
+            entry.offAt = at;
+          }
+          st.lastEventAt = at;
+        } else {
+          throw new Error(`event.kind must be 'on'|'off'`);
+        }
+      }
+      // 自動完了判定
+      maybeAutoFinalize(st);
+      return wrap({ ok: true, captureId, done: st.done }) as any;
+    }
+
+  if (name === 'get_single_capture_status') {
+      const captureId: string | undefined = args?.captureId;
+      if (!captureId) throw new Error("'captureId' is required for get_single_capture_status");
+      const st = captureRegistry.get(captureId);
+      if (!st) throw new Error(`captureId not found: ${captureId}`);
+      maybeAutoFinalize(st);
+  if (st.done && !st.result) finalizeCapture(st, st.reason || 'completed');
+  return wrap({ ok: true, captureId, done: st.done, reason: st.reason, result: st.result }) as any;
     }
 
     // insert_sustain: 指定範囲に CC64 (Sustain) on/off を挿入
@@ -802,9 +1057,9 @@ async function main() {
 
       // 出力デバイスを開く（macOS以外でもnode-midiがあれば開く）
   try {
-        const Out = await loadMidi();
-        if (Out) {
-          const out = new Out();
+        const { MidiOutput: OutCls } = await loadMidi();
+        if (OutCls) {
+          const out = new OutCls();
           const ports = out.getPortCount?.() ?? 0;
           let target = 0;
           const pickByHint = (o:any, hint:string) => {
@@ -978,9 +1233,9 @@ async function main() {
       const devices: Array<{ id: string; name: string }> = [];
       if (process.platform === "darwin") {
         try {
-          const Out = await loadMidi();
-          if (Out) {
-            const out = new Out();
+          const { MidiOutput: OutCls } = await loadMidi();
+          if (OutCls) {
+            const out = new OutCls();
             const count = typeof out.getPortCount === "function" ? out.getPortCount() : 0;
             for (let i = 0; i < count; i++) {
               try {
@@ -1014,9 +1269,9 @@ async function main() {
       // macOSで node-midi が利用可能な場合のみ、即時に開閉する簡易送出でPoC
       let playbackId = randomUUID();
       if (process.platform === 'darwin') {
-        const Out = await loadMidi();
-        if (Out) {
-          const out = new Out();
+        const { MidiOutput: OutCls } = await loadMidi();
+        if (OutCls) {
+          const out = new OutCls();
           const ports = out.getPortCount();
           // ポート選択: 指定があれば部分一致（大文字小文字無視）、無ければIAC/Network/Virtual優先、無ければ0
           let target = 0;
