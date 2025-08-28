@@ -75,32 +75,32 @@ graph TB
     end
     
     %% Relationships
-    MidiFile -.-> JsonMidi : converts to
-    JsonMidi -.-> SMFBinary : compiles to
-    ScoreDSL -.-> JsonMidi : compiles to
+    MidiFile -.-> JsonMidi
+    JsonMidi -.-> SMFBinary
+    ScoreDSL -.-> JsonMidi
     
-    Storage --> Manifest : manages
-    Manifest --> MidiItem : contains
-    MidiItem --> MidiFile : references
+    Storage --> Manifest
+    Manifest --> MidiItem
+    MidiItem --> MidiFile
     
-    PlaybackSession --> MidiScheduler : uses
-    MidiScheduler --> MidiOutput : sends to
-    PlaybackSession --> MidiFile : plays
+    PlaybackSession --> MidiScheduler
+    MidiScheduler --> MidiOutput
+    PlaybackSession --> MidiFile
     
-    ContinuousSession --> MidiInput : receives from
-    SingleCapture --> MidiInput : receives from
-    ContinuousSession --> MidiEvent : stores
+    ContinuousSession --> MidiInput
+    SingleCapture --> MidiInput
+    ContinuousSession --> MidiEvent
     
-    EventProcessor --> MidiEvent : processes
-    TimeManager --> MidiEvent : timestamps
+    EventProcessor --> MidiEvent
+    TimeManager --> MidiEvent
     
-    JsonToSmfService --> JsonMidi : consumes
-    SmfToJsonService --> SMFBinary : consumes
-    ScoreCompiler --> ScoreDSL : compiles
+    JsonToSmfService --> JsonMidi
+    SmfToJsonService --> SMFBinary
+    ScoreCompiler --> ScoreDSL
     
-    DeviceManager --> MidiDevice : manages
-    MidiInput --> MidiDevice : uses
-    MidiOutput --> MidiDevice : uses
+    DeviceManager --> MidiDevice
+    MidiInput --> MidiDevice
+    MidiOutput --> MidiDevice
 ```
 
 ## エンティティ詳細
