@@ -14,64 +14,64 @@ MCP MIDI TOOLは非AI・決定論的なMCPスタンドアロンサーバーと�
 graph TB
     %% Core Domain
     subgraph "Core MIDI Domain"
-        MidiFile[MIDI File<br/>- fileId: string<br/>- name: string<br/>- bytes: number<br/>- createdAt: ISO8601]
+        MidiFile["MIDI File<br/>- fileId: string<br/>- name: string<br/>- bytes: number<br/>- createdAt: ISO8601"]
         
-        JsonMidi[JSON MIDI v1<br/>- ppq: number<br/>- tracks: Track[]<br/>- meta: MetaEvents]
+        JsonMidi["JSON MIDI v1<br/>- ppq: number<br/>- tracks: Track array<br/>- meta: MetaEvents"]
         
-        ScoreDSL[Score DSL v1<br/>- ppq: number<br/>- meta: ScoreMeta<br/>- tracks: ScoreTrack[]]
+        ScoreDSL["Score DSL v1<br/>- ppq: number<br/>- meta: ScoreMeta<br/>- tracks: ScoreTrack array"]
         
-        SMFBinary[SMF Binary<br/>- Standard MIDI File<br/>- Bytes representation]
+        SMFBinary["SMF Binary<br/>- Standard MIDI File<br/>- Bytes representation"]
     end
     
     %% Storage & Manifest
     subgraph "Storage Domain"
-        Manifest[Manifest<br/>- items: MidiItem[]]
-        Storage[Storage Layer<br/>- baseDir: string<br/>- dataDir: string<br/>- manifestPath: string]
+        Manifest["Manifest<br/>- items: MidiItem array"]
+        Storage["Storage Layer<br/>- baseDir: string<br/>- dataDir: string<br/>- manifestPath: string"]
         
-        MidiItem[MIDI Item<br/>- id: string<br/>- name: string<br/>- path: string<br/>- bytes: number<br/>- createdAt: ISO8601]
+        MidiItem["MIDI Item<br/>- id: string<br/>- name: string<br/>- path: string<br/>- bytes: number<br/>- createdAt: ISO8601"]
     end
     
     %% Playback Domain
     subgraph "Playback Domain"
-        PlaybackSession[Playback Session<br/>- playbackId: string<br/>- fileId: string<br/>- status: PlaybackStatus<br/>- startedAt: timestamp<br/>- scheduledEvents: MidiEvent[]]
+        PlaybackSession["Playback Session<br/>- playbackId: string<br/>- fileId: string<br/>- status: PlaybackStatus<br/>- startedAt: timestamp<br/>- scheduledEvents: MidiEvent array"]
         
-        MidiScheduler[MIDI Scheduler<br/>- lookaheadMs: number<br/>- tickMs: number<br/>- cursor: number<br/>- noteOffQueue: Map]
+        MidiScheduler["MIDI Scheduler<br/>- lookaheadMs: number<br/>- tickMs: number<br/>- cursor: number<br/>- noteOffQueue: Map"]
         
-        MidiOutput[MIDI Output<br/>- portName: string<br/>- device: MidiDevice]
+        MidiOutput["MIDI Output<br/>- portName: string<br/>- device: MidiDevice"]
     end
     
     %% Recording Domain
     subgraph "Recording Domain"
-        ContinuousSession[Continuous Recording Session<br/>- id: string<br/>- status: RecordingStatus<br/>- ppq: number<br/>- events: MidiEvent[]<br/>- timeouts: TimeoutConfig]
+        ContinuousSession["Continuous Recording Session<br/>- id: string<br/>- status: RecordingStatus<br/>- ppq: number<br/>- events: MidiEvent array<br/>- timeouts: TimeoutConfig"]
         
-        SingleCapture[Single Capture Session<br/>- id: string<br/>- onsetWindowMs: number<br/>- notes: Map&lt;number, NoteInfo&gt;<br/>- done: boolean]
+        SingleCapture["Single Capture Session<br/>- id: string<br/>- onsetWindowMs: number<br/>- notes: Map of number to NoteInfo<br/>- done: boolean"]
         
-        MidiInput[MIDI Input<br/>- portName: string<br/>- device: MidiDevice<br/>- handlers: EventHandler[]]
+        MidiInput["MIDI Input<br/>- portName: string<br/>- device: MidiDevice<br/>- handlers: EventHandler array"]
     end
     
     %% Event Processing
     subgraph "Event Processing Domain"
-        MidiEvent[MIDI Event<br/>- tick: number<br/>- type: EventType<br/>- channel: number<br/>- data: EventData]
+        MidiEvent["MIDI Event<br/>- tick: number<br/>- type: EventType<br/>- channel: number<br/>- data: EventData"]
         
-        EventProcessor[Event Processor<br/>- filters: EventFilter[]<br/>- transformers: EventTransformer[]]
+        EventProcessor["Event Processor<br/>- filters: EventFilter array<br/>- transformers: EventTransformer array"]
         
-        TimeManager[Time Manager<br/>- ppq: number<br/>- bpm: number<br/>- tickToMs(): number<br/>- msToTick(): number]
+        TimeManager["Time Manager<br/>- ppq: number<br/>- bpm: number<br/>- tickToMs(): number<br/>- msToTick(): number"]
     end
     
     %% Conversion Services
     subgraph "Conversion Domain"
-        JsonToSmfService[JSON to SMF Service<br/>- encode(json): SMFBinary<br/>- validate(json): ValidationResult]
+        JsonToSmfService["JSON to SMF Service<br/>- encode(json): SMFBinary<br/>- validate(json): ValidationResult"]
         
-        SmfToJsonService[SMF to JSON Service<br/>- decode(smf): JsonMidi<br/>- extractMeta(): MetaInfo]
+        SmfToJsonService["SMF to JSON Service<br/>- decode(smf): JsonMidi<br/>- extractMeta(): MetaInfo"]
         
-        ScoreCompiler[Score DSL Compiler<br/>- compileToJsonMidi(): JsonMidi<br/>- validateScore(): ValidationResult<br/>- autoCcPresets: PresetProcessor[]]
+        ScoreCompiler["Score DSL Compiler<br/>- compileToJsonMidi(): JsonMidi<br/>- validateScore(): ValidationResult<br/>- autoCcPresets: PresetProcessor array"]
     end
     
     %% Device Management
     subgraph "Device Domain"
-        DeviceManager[Device Manager<br/>- listInputDevices(): Device[]<br/>- listOutputDevices(): Device[]<br/>- getDevice(name): Device]
+        DeviceManager["Device Manager<br/>- listInputDevices(): Device array<br/>- listOutputDevices(): Device array<br/>- getDevice(name): Device"]
         
-        MidiDevice[MIDI Device<br/>- index: number<br/>- name: string<br/>- type: DeviceType<br/>- available: boolean]
+        MidiDevice["MIDI Device<br/>- index: number<br/>- name: string<br/>- type: DeviceType<br/>- available: boolean"]
     end
     
     %% Relationships
