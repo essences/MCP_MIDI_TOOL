@@ -128,6 +128,10 @@ Score DSL → JSON MIDI コンパイル時に、演奏表現を補助するCCイ
 - start_single_capture: 単発(単音/和音)リアルタイムキャプチャ開始（onsetWindow内ノートを和音化）
 - feed_single_capture: （テスト/擬似入力用）キャプチャ中セッションへノートON/OFFイベント投入
 - get_single_capture_status: キャプチャ進捗/完了結果取得（reason, result を含む）
+- start_continuous_recording: MIDI入力デバイスから継続的な演奏記録を開始（3種類タイムアウト・フィルタリング対応）
+- get_continuous_recording_status: 記録セッションの現在状態・進捗・メトリクス取得（リアルタイム監視）
+- stop_continuous_recording: 継続記録セッション手動終了・SMF生成保存・fileId発行
+- list_continuous_recordings: 進行中・完了済み記録セッション一覧取得（デバッグ・監視用）
 
 戻り値はClaude互換の`content: [{type:'text', text: ...}]`を含みます。
 
@@ -250,6 +254,61 @@ feed_single_capture の events 形式:
 - done:false の間は reason 未設定
 - result は完了後イミュータブル
 - durationMs は和音最初のNoteOnから最終Off相対
+
+#### 継続MIDI記録 (continuous recording)
+MIDI入力デバイスから演奏全体を継続的に記録し、自動または手動でSMFファイルとして保存する機能。長時間演奏、複数楽器パート、レッスン記録などに対応。
+
+**主要機能**:
+- **3種類の自動終了**: idle timeout（初回入力待ち）、silence timeout（演奏終了検出）、max duration（最大記録時間）
+- **マルチセッション**: 最大3セッション同時記録対応（セッション間分離）
+- **フィルタリング**: チャンネル（1-16）・イベントタイプ（note/cc/pitchBend/program）による記録対象絞り込み
+- **メモリ管理**: イベント数100K上限、セッション10MB制限、24時間自動削除
+- **自動SMF保存**: タイムアウト時の自動ファイル生成・重複回避命名・manifest更新
+
+**基本フロー例**:
+```jsonc
+// 1) 記録開始
+{ "tool":"start_continuous_recording", "arguments": {
+   "ppq": 480,
+   "maxDurationMs": 300000,     // 5分で自動終了
+   "idleTimeoutMs": 30000,      // 初回入力30秒待ち
+   "silenceTimeoutMs": 10000,   // 最終入力から10秒無音で終了
+   "channelFilter": [1, 2, 10], // ch1,2,10のみ記録
+   "eventTypeFilter": ["note", "cc"]
+}}
+// -> { recordingId, portName, ppq, status:"waiting_for_input", startedAt, ... }
+
+// 2) 状態監視（ポーリング推奨）
+{ "tool":"get_continuous_recording_status", "arguments": { "recordingId":"<id>" }}
+// -> { status:"recording", eventCount:245, durationMs:82000, eventBreakdown:{note:180,cc:65}, channelActivity:{1:120,2:85,10:40}, timeUntilTimeout:218000, ... }
+
+// 3a) 手動終了・SMF保存
+{ "tool":"stop_continuous_recording", "arguments": { "recordingId":"<id>", "name":"my-session.mid" }}
+// -> { fileId, name, path, bytes, durationMs, eventCount, reason:"manual_stop", recordingStartedAt, savedAt, ... }
+
+// 3b) または自動終了（タイムアウト検出）
+{ "tool":"get_continuous_recording_status", "arguments": { "recordingId":"<id>" }}
+// -> { status:"timeout_silence", reason:"silence_timeout", ... } (SMFは非同期で自動保存済み)
+```
+
+**セッション一覧・デバッグ用**:
+```jsonc
+// アクティブなセッション確認
+{ "tool":"list_continuous_recordings", "arguments": { "status":"active", "limit":10 }}
+// -> { recordings:[{recordingId,status,startedAt,durationMs,eventCount,portName},...], total:2, activeCount:2, completedCount:0 }
+
+// 完了済み含む全セッション
+{ "tool":"list_continuous_recordings", "arguments": { "status":"all" }}
+```
+
+**状態遷移**: `waiting_for_input` → `recording` → `completed`/`timeout_idle`/`timeout_silence`/`timeout_max_duration`/`stopped_manually`
+
+**制約・リソース管理**:
+- 同時記録セッション: 最大3セッション
+- イベント数上限: セッションあたり100,000イベント
+- メモリ上限: セッションあたり10MB推定
+- 自動削除: 完了から24時間後に未保存セッション削除
+- ファイル命名: デフォルト `recording-YYYY-MM-DD-HHmmss.mid`、重複時は番号suffix付与
 
 
 ### JSONイベント仕様（抜粋）

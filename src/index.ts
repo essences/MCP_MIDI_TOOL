@@ -110,6 +110,7 @@ async function main() {
   { name: "start_continuous_recording", description: "MIDI入力デバイスから継続的な演奏記録を開始", inputSchema: { type: "object", properties: { portName: { type: "string" }, ppq: { type: "number", minimum: 96, maximum: 1920 }, maxDurationMs: { type: "number", minimum: 10000, maximum: 3600000 }, idleTimeoutMs: { type: "number", minimum: 5000, maximum: 120000 }, silenceTimeoutMs: { type: "number", minimum: 2000, maximum: 60000 }, channelFilter: { type: "array", items: { type: "number", minimum: 1, maximum: 16 } }, eventTypeFilter: { type: "array", items: { type: "string", enum: ["note", "cc", "pitchBend", "program"] } } }, required: [] } },
   { name: "get_continuous_recording_status", description: "記録セッションの現在状態・進捗・メトリクス取得", inputSchema: { type: "object", properties: { recordingId: { type: "string" } }, required: ["recordingId"] } },
   { name: "stop_continuous_recording", description: "継続記録セッション手動終了・SMF生成保存・fileId発行", inputSchema: { type: "object", properties: { recordingId: { type: "string" }, name: { type: "string" }, overwrite: { type: "boolean" } }, required: ["recordingId"] } },
+  { name: "list_continuous_recordings", description: "進行中・完了済み記録セッション一覧取得（デバッグ・監視用）", inputSchema: { type: "object", properties: { status: { type: "string", enum: ["active", "completed", "all"], default: "active" }, limit: { type: "number", default: 10, maximum: 50 } }, required: [] } },
         { name: "stop_playback", description: "playbackIdを停止", inputSchema: { type: "object", properties: { playbackId: { type: "string" } }, required: ["playbackId"] } },
         { name: "find_midi", description: "名前でMIDIを検索（部分一致）", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }
       ];
@@ -634,6 +635,40 @@ async function main() {
     const continuousRecordingRegistry: Map<string, ContinuousRecordingSession> = 
       (globalThis as any).__continuousRecordings = (globalThis as any).__continuousRecordings || new Map();
 
+    // 24時間自動削除クリーンアップ
+    function cleanupOldSessions() {
+      const now = Date.now();
+      const maxAge = 24 * 60 * 60 * 1000; // 24時間
+      
+      for (const [sessionId, session] of continuousRecordingRegistry.entries()) {
+        // 完了から24時間経過したセッションを削除
+        if (session.status === 'completed' || 
+            session.status.startsWith('timeout_') || 
+            session.status === 'stopped_manually' ||
+            session.status === 'error') {
+          const endTime = session.lastInputAt || session.startedAt;
+          if (now - endTime > maxAge) {
+            // MIDI入力ポートがまだ開いていれば閉じる
+            if (session.inputInstance) {
+              try {
+                if (typeof session.inputInstance.closePort === 'function') {
+                  session.inputInstance.closePort();
+                }
+              } catch {
+                // クローズエラーは無視
+              }
+            }
+            continuousRecordingRegistry.delete(sessionId);
+          }
+        }
+      }
+    }
+
+    // 定期的なクリーンアップ（5分毎）
+    const cleanupInterval = setInterval(cleanupOldSessions, 5 * 60 * 1000);
+    // プロセス終了時にクリーンアップ停止
+    process.once('exit', () => clearInterval(cleanupInterval));
+
     function finalizeCapture(st: CaptureState, reason: 'completed' | 'timeout' = 'completed') {
       if (st.done) return;
       st.done = true;
@@ -1014,6 +1049,23 @@ async function main() {
     }
 
     function addEventToSession(session: ContinuousRecordingSession, midiBytes: number[], relativeMs: number) {
+      // メモリ制限チェック（イベント数上限: 100,000）
+      if (session.events.length >= 100000) {
+        session.status = 'error';
+        session.reason = 'event_limit_exceeded';
+        finalizeSession(session, 'event_limit_exceeded');
+        return;
+      }
+
+      // 推定メモリサイズチェック（セッション全体で10MB上限）
+      const estimatedMemoryBytes = session.events.length * 50; // イベントあたり約50バイト推定
+      if (estimatedMemoryBytes >= 10 * 1024 * 1024) { // 10MB
+        session.status = 'error';
+        session.reason = 'memory_limit_exceeded';
+        finalizeSession(session, 'memory_limit_exceeded');
+        return;
+      }
+
       const status = midiBytes[0] || 0;
       const type = status & 0xF0;
       const channel = status & 0x0F; // 内部0-15
@@ -1104,6 +1156,15 @@ async function main() {
     if (name === 'start_continuous_recording') {
       await loadMidi();
       if (!MidiInput) throw new Error('node-midi not available for input');
+      
+      // マルチセッション制限チェック（最大3セッション同時）
+      const activeSessions = Array.from(continuousRecordingRegistry.values()).filter(s => 
+        s.status === 'waiting_for_input' || s.status === 'recording'
+      );
+      if (activeSessions.length >= 3) {
+        const error = classifyError('start_continuous_recording', new Error("Maximum concurrent recording sessions (3) exceeded"));
+        return wrap({ ok: false, error }) as any;
+      }
       
       // パラメータ解析
       const ppq = Number.isFinite(Number(args?.ppq)) ? Math.max(96, Math.min(1920, Number(args.ppq))) : 480;
@@ -1311,6 +1372,92 @@ async function main() {
         recordingStartedAt: new Date(session.startedAt).toISOString(),
         recordingEndedAt: session.lastInputAt ? new Date(session.lastInputAt).toISOString() : new Date(session.startedAt).toISOString(),
         savedAt: new Date().toISOString()
+      }) as any;
+    }
+
+    if (name === 'list_continuous_recordings') {
+      const statusFilter: string = args?.status || 'active';
+      const limit: number = Math.max(1, Math.min(50, args?.limit || 10));
+
+      const allSessions = Array.from(continuousRecordingRegistry.values());
+      
+      // フィルター適用
+      let filteredSessions = allSessions;
+      if (statusFilter === 'active') {
+        filteredSessions = allSessions.filter(s => 
+          s.status === 'waiting_for_input' || s.status === 'recording'
+        );
+      } else if (statusFilter === 'completed') {
+        filteredSessions = allSessions.filter(s => 
+          s.status === 'completed' || 
+          s.status === 'timeout_idle' || 
+          s.status === 'timeout_silence' || 
+          s.status === 'timeout_max_duration' || 
+          s.status === 'stopped_manually'
+        );
+      }
+      // statusFilter === 'all' の場合はフィルターなし
+
+      // 制限適用（新しいものから順）
+      const sortedSessions = filteredSessions
+        .sort((a, b) => b.startedAt - a.startedAt)
+        .slice(0, limit);
+
+      // レスポンス形式に変換
+      const recordings = sortedSessions.map(session => {
+        const now = Date.now();
+        const durationMs = session.lastInputAt 
+          ? session.lastInputAt - session.startedAt
+          : now - session.startedAt;
+
+        const recording: any = {
+          recordingId: session.id,
+          status: session.status,
+          startedAt: new Date(session.startedAt).toISOString(),
+          durationMs: Math.max(0, durationMs),
+          eventCount: session.events.length,
+          portName: session.inputPortName || 'unknown'
+        };
+
+        // 完了セッションの場合は追加情報
+        if (session.status === 'completed' || 
+            session.status.startsWith('timeout_') || 
+            session.status === 'stopped_manually') {
+          if (session.lastInputAt) {
+            recording.endedAt = new Date(session.lastInputAt).toISOString();
+          }
+          if (session.reason) {
+            recording.reason = session.reason;
+          }
+          // fileIdは保存後に設定されるが、現在の実装ではセッション終了と同時にレジストリから削除される
+          // 将来的な拡張では保存されたfileId情報を含める可能性がある
+          recording.fileId = null;
+          recording.name = null;
+        } else {
+          recording.fileId = null;
+        }
+
+        return recording;
+      });
+
+      // 統計情報
+      const activeCount = allSessions.filter(s => 
+        s.status === 'waiting_for_input' || s.status === 'recording'
+      ).length;
+      const completedCount = allSessions.filter(s => 
+        s.status === 'completed' || 
+        s.status === 'timeout_idle' || 
+        s.status === 'timeout_silence' || 
+        s.status === 'timeout_max_duration' || 
+        s.status === 'stopped_manually'
+      ).length;
+
+      return wrap({
+        ok: true,
+        recordings,
+        total: allSessions.length,
+        activeCount,
+        completedCount
       }) as any;
     }
 

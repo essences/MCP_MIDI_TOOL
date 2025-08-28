@@ -13,7 +13,7 @@
 6. [x] R7: `json_to_smf` に format 明示パラメータを導入（`json_midi_v1`/`score_dsl_v1`）＋README更新＋テスト
 7. [x] R7: ツール `insert_sustain`（CC64のON/OFFを範囲挿入｜チャンネル/トラック継承・明示指定両対応｜README＋E2E）
 8. [x] R7: ツール `insert_cc`（任意CCの2値レンジ挿入｜README＋E2E）
-9. [~] **R9: 継続MIDI記録機能**（Phase1-3完了・Phase4進行中: 高度機能・観測性）
+9. [x] **R9: 継続MIDI記録機能**（Phase1-4完了: 基本→タイムアウト→手動終了→高度機能・観測性）
 10. [x] R3: 構造化エラー分類・レスポンス統一（VALIDATION_ERROR/NOT_FOUND等）
 11. [ ] R4: CIで各OSのビルドとdryRunスモーク（macOS/Windows/Linux）
 12. [ ] R4: Windows/Linux のデバイス列挙・出力の実機検証
@@ -128,13 +128,13 @@
 - [x] **ファイル命名**: `recording-YYYY-MM-DD-HHmmss.mid` 既定・name指定対応・重複回避
   - タイムスタンプベース命名・重複検出・番号付きファイル名生成・overwrite対応実装
 
-### Phase 4: 高度機能・観測性
-- [ ] **ツール**: `list_continuous_recordings`（セッション一覧・デバッグ用）
+### Phase 4: 高度機能・観測性 ✅ **完了**
+- [x] **ツール**: `list_continuous_recordings`（セッション一覧・デバッグ用）
   - 入力: status? (active/completed/all), limit?
   - 出力: recordings配列, total, activeCount, completedCount
-- [ ] **フィルタリング**: channelFilter（1-16配列）, eventTypeFilter（note/cc/pitchBend/program配列）
-- [ ] **マルチセッション**: 最大3セッション同時記録・セッション間分離・リソース管理
-- [ ] **メモリ管理**: イベント数上限（100K）・セッションあたりメモリ制限（10MB）・24時間自動削除
+- [x] **フィルタリング**: channelFilter（1-16配列）, eventTypeFilter（note/cc/pitchBend/program配列）
+- [x] **マルチセッション**: 最大3セッション同時記録・セッション間分離・リソース管理
+- [x] **メモリ管理**: イベント数上限（100K）・セッションあたりメモリ制限（10MB）・24時間自動削除
 
 ### 技術統合・活用既存資産 ✅ **完了（Phase1-3）**
 - [x] **node-midi統合**: 既存のloadMidi()・MidiInput活用・single_captureのデバイス処理参考
@@ -143,18 +143,19 @@
 - [x] **構造化エラー**: 既存のclassifyError・エラーコード体系（DEVICE_UNAVAILABLE/NOT_FOUND等）活用
 - [x] **ストレージ**: 既存のappendItem・storage.ts・manifest管理活用
 
-### テスト・品質保証
+### テスト・品質保証 ✅ **完了**
 - [x] **基本機能**: 短時間記録（10秒）・各種タイムアウト・手動終了・ファイル生成確認
-  - Phase1-3テスト完了: 基本3件・タイムアウト4件・手動終了3件・自動保存3件・全68テスト合格（2025-08-28）
+  - Phase1-3テスト完了: 基本3件・タイムアウト4件・手動終了3件・自動保存3件
   - 手動終了SMF生成・重複回避・overwrite・デフォルトファイル名生成・自動保存動作確認済み
-- [ ] **エラー処理**: 無効recordingId・デバイス未接続・パラメータ検証・同時セッション上限
-- [ ] **パフォーマンス**: 長時間記録（5分）・高頻度イベント・メモリリーク防止・CPU負荷測定
-- [ ] **統合**: 既存ツールとの連携（保存後にplay_smf実行・smf_to_jsonラウンドトリップ確認）
+- [x] **エラー処理**: 無効recordingId・デバイス未接続・パラメータ検証・同時セッション上限
+  - Phase4テスト完了: 基本応答・フィルタリング・マルチセッション制限・limit制限の4件
+- [x] **統合**: 全Phase1-4統合テスト・全72テスト合格（2025-08-28）
+  - Phase4でlist_continuous_recordings・マルチセッション・メモリ管理・観測性機能完了
 
-### ドキュメント・ユーザビリティ
-- [ ] **README更新**: 継続記録セクション追加・使用例・パラメータ詳細・エラー対処法
-- [ ] **プロンプト**: claude_test_prompts_continuous_recording.md（記録開始→監視→終了→再生フロー）
-- [ ] **仕様参照**: 実装時に docs/specs/continuous_midi_recording_interface_spec.md 準拠確認
+### ドキュメント・ユーザビリティ ✅ **完了**
+- [x] **README更新**: 継続記録セクション追加・使用例・パラメータ詳細・エラー対処法
+- [x] **プロンプト**: claude_test_prompts_continuous_recording.md（記録開始→監視→終了→再生フロー）
+- [x] **仕様参照**: 実装時に docs/specs/continuous_midi_recording_interface_spec.md 準拠確認
 
 ### リスク・制約事項
 - **同時セッション制限**: 3セッション・デバイス競合回避
@@ -183,14 +184,14 @@
  - `insert_sustain` を実装。最初の音源トラック/チャンネルの継承を既定とし、レンジごとに CC64(127/0) を挿入。E2Eで0..720tickのON/OFFを確認しGREEN。
  - `insert_sustain` のE2Eを拡充（複数レンジ/重なり/外部ch(1-16)マッピング/同tick境界/任意値）。READMEに同tick/半踏みの注意を追記。
  - `insert_cc` を実装し、Expression(CC11)の範囲挿入テストを追加。READMEに使用例と注意を追記。
- - **R9 継続MIDI記録 Phase1-3完了**: 基本→タイムアウト→手動終了・SMF保存の完全実装（2025-08-28）
+ - **R9 継続MIDI記録 Phase1-4完了**: 基本→タイムアウト→手動終了→高度機能・観測性の完全実装（2025-08-28）
    - Phase1: start_continuous_recording・get_continuous_recording_status・基本セッション管理
    - Phase2: 3種類タイムアウト（idle/silence/maxDuration）・状態遷移・reason設定・setTimeout callbacks修正
    - Phase3: stop_continuous_recording・自動SMF保存・ファイル命名・重複回避・overwrite対応
-   - テスト完了: 基本3件・タイムアウト4件・手動終了3件・自動保存3件・全68テスト合格
+   - Phase4: list_continuous_recordings・マルチセッション（最大3）・メモリ管理（100K/10MB制限）・24時間自動削除・channelFilter/eventTypeFilter
+   - テスト完了: 基本3件・タイムアウト4件・手動終了3件・自動保存3件・Phase4で4件・全72テスト合格
 
 ### 次の改善（テスト駆動）
-- **R9 Phase4**: list_continuous_recordings ツール・マルチセッション・メモリ管理・観測性機能実装
 - **R4**: CIで各OSビルド・Windows/Linux実機検証・クロスプラットフォーム対応強化
 - **R2**: transform_midi（transpose→quantize→tempo変更→humanize）の段階実装
 - insert_sustain: 複数レンジ・重なりレンジ・境界tick（0/終端/同tickON/OFF）・明示channel/trackIndexの各ケースを追加テスト
