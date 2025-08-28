@@ -107,6 +107,9 @@ async function main() {
   { name: "start_single_capture", description: "リアルタイム単発(単音/和音)キャプチャ開始 (onsetWindow内を和音と判定)", inputSchema: { type: "object", properties: { onsetWindowMs: { type: "number" }, silenceMs: { type: "number" }, maxWaitMs: { type: "number" } } } },
   { name: "feed_single_capture", description: "(テスト/内部) start_single_capture中の擬似MIDIイベント投入", inputSchema: { type: "object", properties: { captureId: { type: "string" }, events: { type: "array", items: { type: "object", properties: { kind: { type: "string", enum: ["on","off"] }, note: { type: "number" }, velocity: { type: "number" }, at: { type: "number" } }, required: ["kind","note","at"] } } }, required: ["captureId","events"] } },
   { name: "get_single_capture_status", description: "単発キャプチャ状態取得(完了時に結果返却)", inputSchema: { type: "object", properties: { captureId: { type: "string" } }, required: ["captureId"] } },
+  { name: "start_continuous_recording", description: "MIDI入力デバイスから継続的な演奏記録を開始", inputSchema: { type: "object", properties: { portName: { type: "string" }, ppq: { type: "number", minimum: 96, maximum: 1920 }, maxDurationMs: { type: "number", minimum: 10000, maximum: 3600000 }, idleTimeoutMs: { type: "number", minimum: 5000, maximum: 120000 }, silenceTimeoutMs: { type: "number", minimum: 2000, maximum: 60000 }, channelFilter: { type: "array", items: { type: "number", minimum: 1, maximum: 16 } }, eventTypeFilter: { type: "array", items: { type: "string", enum: ["note", "cc", "pitchBend", "program"] } } }, required: [] } },
+  { name: "get_continuous_recording_status", description: "記録セッションの現在状態・進捗・メトリクス取得", inputSchema: { type: "object", properties: { recordingId: { type: "string" } }, required: ["recordingId"] } },
+  { name: "stop_continuous_recording", description: "継続記録セッション手動終了・SMF生成保存・fileId発行", inputSchema: { type: "object", properties: { recordingId: { type: "string" }, name: { type: "string" }, overwrite: { type: "boolean" } }, required: ["recordingId"] } },
         { name: "stop_playback", description: "playbackIdを停止", inputSchema: { type: "object", properties: { playbackId: { type: "string" } }, required: ["playbackId"] } },
         { name: "find_midi", description: "名前でMIDIを検索（部分一致）", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }
       ];
@@ -593,6 +596,44 @@ async function main() {
     };
     const captureRegistry: Map<string, CaptureState> = (globalThis as any).__singleCaptures = (globalThis as any).__singleCaptures || new Map();
 
+    // --- 継続記録セッション管理 -----------------------------------------
+    type ContinuousRecordingSession = {
+      id: string;
+      startedAt: number; // epoch ms
+      firstInputAt?: number; // epoch ms
+      lastInputAt?: number; // epoch ms
+      status: 'waiting_for_input' | 'recording' | 'completed' | 'timeout_idle' | 'timeout_silence' | 'timeout_max_duration' | 'stopped_manually' | 'error';
+      reason?: string;
+      // 設定値
+      ppq: number;
+      maxDurationMs: number;
+      idleTimeoutMs: number;
+      silenceTimeoutMs: number;
+      channelFilter?: number[]; // 1-16 external representation
+      eventTypeFilter: string[]; // 'note', 'cc', 'pitchBend', 'program'
+      // MIDI入力管理
+      inputInstance?: any; // node-midi Input
+      inputPortName?: string;
+      // イベントバッファ
+      events: Array<{
+        tick: number;
+        type: string;
+        channel?: number; // 内部0-15
+        [key: string]: any;
+      }>;
+      // タイマー管理
+      idleTimer?: NodeJS.Timeout;
+      silenceTimer?: NodeJS.Timeout;
+      maxDurationTimer?: NodeJS.Timeout;
+      // メトリクス
+      eventCount: number;
+      eventBreakdown: Record<string, number>;
+      channelActivity: Record<string, number>;
+    };
+
+    const continuousRecordingRegistry: Map<string, ContinuousRecordingSession> = 
+      (globalThis as any).__continuousRecordings = (globalThis as any).__continuousRecordings || new Map();
+
     function finalizeCapture(st: CaptureState, reason: 'completed' | 'timeout' = 'completed') {
       if (st.done) return;
       st.done = true;
@@ -783,6 +824,494 @@ async function main() {
       maybeAutoFinalize(st);
   if (st.done && !st.result) finalizeCapture(st, st.reason || 'completed');
   return wrap({ ok: true, captureId, done: st.done, reason: st.reason, result: st.result }) as any;
+    }
+
+    // --- 継続記録ツール実装 ---------------------------------------------
+    
+    // 継続記録セッション管理関数
+    function createContinuousSession(
+      portName: string,
+      ppq: number,
+      maxDurationMs: number,
+      idleTimeoutMs: number,
+      silenceTimeoutMs: number,
+      channelFilter?: number[],
+      eventTypeFilter?: string[]
+    ): ContinuousRecordingSession {
+      const id = randomUUID();
+      const session: ContinuousRecordingSession = {
+        id,
+        startedAt: Date.now(),
+        status: 'waiting_for_input',
+        ppq,
+        maxDurationMs,
+        idleTimeoutMs,
+        silenceTimeoutMs,
+        channelFilter,
+        eventTypeFilter: eventTypeFilter || ['note', 'cc', 'pitchBend', 'program'],
+        inputPortName: portName,
+        events: [],
+        eventCount: 0,
+        eventBreakdown: {},
+        channelActivity: {}
+      };
+      return session;
+    }
+
+    // セッション終了処理（クリーンアップ）
+    function finalizeSession(session: ContinuousRecordingSession, reason: string) {
+      // reasonは常に設定（既に終了済みでも更新）
+      session.reason = reason;
+
+      // 既に終了済みの場合はクリーンアップをスキップ
+      if (session.status.startsWith('timeout_') || session.status === 'completed' || session.status === 'stopped_manually') {
+        // reasonは設定したので、クリーンアップ処理のみスキップ
+        if (!session.idleTimer && !session.silenceTimer && !session.maxDurationTimer) {
+          return; // 既にクリーンアップ済み
+        }
+      }
+
+      // タイマークリア
+      if (session.idleTimer) {
+        clearTimeout(session.idleTimer);
+        session.idleTimer = undefined;
+      }
+      if (session.silenceTimer) {
+        clearTimeout(session.silenceTimer);
+        session.silenceTimer = undefined;
+      }
+      if (session.maxDurationTimer) {
+        clearTimeout(session.maxDurationTimer);
+        session.maxDurationTimer = undefined;
+      }
+
+      // MIDI入力クローズ
+      if (session.inputInstance) {
+        try {
+          session.inputInstance.closePort();
+        } catch {}
+        session.inputInstance = undefined;
+      }
+    }
+
+    // サイレンスタイマー開始
+    function startSilenceTimer(session: ContinuousRecordingSession) {
+      // 既存のサイレンスタイマーをクリア
+      if (session.silenceTimer) {
+        clearTimeout(session.silenceTimer);
+      }
+
+      session.silenceTimer = setTimeout(async () => {
+        const currentSession = continuousRecordingRegistry.get(session.id);
+        if (currentSession && currentSession.status === 'recording') {
+          currentSession.status = 'timeout_silence';
+          finalizeSession(currentSession, 'silence_timeout');
+          
+          // 自動SMF保存
+          try {
+            await saveContinuousRecordingAsSmf(currentSession);
+          } catch (error) {
+            console.error('Failed to auto-save recording on silence timeout:', error);
+          }
+          
+          continuousRecordingRegistry.set(currentSession.id, currentSession);
+        }
+      }, session.silenceTimeoutMs);
+    }
+
+    // 継続記録セッションをSMFとして保存
+    async function saveContinuousRecordingAsSmf(
+      session: ContinuousRecordingSession, 
+      name?: string, 
+      overwrite?: boolean
+    ): Promise<{
+      fileId: string;
+      name: string;
+      path: string;
+      bytes: number;
+      durationMs: number;
+      eventCount: number;
+      ppq: number;
+      trackCount: number;
+    }> {
+      // ファイル名生成・重複回避
+      const timestamp = new Date(session.startedAt);
+      const defaultName = `recording-${timestamp.getFullYear()}-${String(timestamp.getMonth() + 1).padStart(2, '0')}-${String(timestamp.getDate()).padStart(2, '0')}-${String(timestamp.getHours()).padStart(2, '0')}${String(timestamp.getMinutes()).padStart(2, '0')}${String(timestamp.getSeconds()).padStart(2, '0')}.mid`;
+      let filename = name || defaultName;
+      
+      // 重複回避（overwriteが false の場合）
+      if (!overwrite) {
+        let counter = 1;
+        const originalFilename = filename;
+        const baseName = filename.replace(/\.mid$/, '');
+        
+        // 既存ファイルをチェック
+        while (true) {
+          try {
+            const testPath = path.resolve(resolveBaseDir(), 'data/midi', filename);
+            await fs.access(testPath);
+            // ファイルが存在する場合、番号付きファイル名を生成
+            filename = `${baseName}_${counter}.mid`;
+            counter++;
+          } catch {
+            // ファイルが存在しない場合、このファイル名を使用
+            break;
+          }
+        }
+      }
+
+      // JSON MIDI形式に変換
+      const jsonMidi = {
+        format: 0 as const,
+        ppq: session.ppq,
+        tracks: [
+          {
+            events: session.events as any // 型チェックをスキップ（実行時は正しいイベント形式）
+          }
+        ]
+      };
+
+      // 既存のjson_to_smf機能を活用してSMFバイナリを生成
+      const smfBuffer = encodeToSmfBinary(jsonMidi);
+      
+      // ファイル保存とマニフェスト追加
+      const fileId = randomUUID();
+      const filePath = `data/midi/${filename}`;
+      
+      // 実際のファイル書き込み
+      const absolutePath = path.resolve(resolveBaseDir(), filePath);
+      await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+      await fs.writeFile(absolutePath, smfBuffer);
+      
+      // マニフェストに追加
+      const item = {
+        id: fileId,
+        name: filename,
+        bytes: smfBuffer.length,
+        path: filePath,
+        createdAt: Date.now().toString()
+      };
+      
+      await appendItem(item);
+
+      return {
+        fileId,
+        name: filename,
+        path: filePath,
+        bytes: smfBuffer.length,
+        durationMs: session.lastInputAt ? (session.lastInputAt - session.startedAt) : 0,
+        eventCount: session.eventCount,
+        ppq: session.ppq,
+        trackCount: 1
+      };
+    }
+
+    function msToTick(relativeMs: number, ppq: number): number {
+      // 仮の固定テンポ120BPM (500000 us/quarter)
+      const usPerQuarter = 500000;
+      const ticksPerMs = (ppq * 1000) / usPerQuarter;
+      return Math.round(relativeMs * ticksPerMs);
+    }
+
+    function addEventToSession(session: ContinuousRecordingSession, midiBytes: number[], relativeMs: number) {
+      const status = midiBytes[0] || 0;
+      const type = status & 0xF0;
+      const channel = status & 0x0F; // 内部0-15
+      const externalChannel = channel + 1; // 外部1-16
+
+      // チャンネルフィルター適用
+      if (session.channelFilter && !session.channelFilter.includes(externalChannel)) {
+        return;
+      }
+
+      const tick = msToTick(relativeMs, session.ppq);
+      let eventType = '';
+      let event: any = { tick, channel };
+
+      if (type === 0x90 && midiBytes.length >= 3) { // Note On
+        const velocity = midiBytes[2] || 0;
+        if (velocity > 0) {
+          eventType = 'note';
+          event = {
+            ...event,
+            type: 'note',
+            pitch: midiBytes[1] || 0,
+            velocity,
+            // duration は Note Off で計算（今は仮値）
+            duration: session.ppq
+          };
+        } else {
+          // Velocity 0 は Note Off扱い - 今は無視
+          return;
+        }
+      } else if (type === 0x80 && midiBytes.length >= 3) { // Note Off
+        // Note Off処理は後で実装 - 今は無視
+        return;
+      } else if (type === 0xB0 && midiBytes.length >= 3) { // Control Change
+        eventType = 'cc';
+        event = {
+          ...event,
+          type: 'cc',
+          controller: midiBytes[1] || 0,
+          value: midiBytes[2] || 0
+        };
+      } else if (type === 0xE0 && midiBytes.length >= 3) { // Pitch Bend
+        eventType = 'pitchBend';
+        const value = ((midiBytes[2] || 0) << 7) | (midiBytes[1] || 0);
+        event = {
+          ...event,
+          type: 'pitchBend',
+          value: value - 8192 // -8192 to +8191
+        };
+      } else if (type === 0xC0 && midiBytes.length >= 2) { // Program Change
+        eventType = 'program';
+        event = {
+          ...event,
+          type: 'program',
+          program: midiBytes[1] || 0
+        };
+      } else {
+        return; // 未対応イベント
+      }
+
+      // イベントタイプフィルター適用
+      if (!session.eventTypeFilter.includes(eventType)) {
+        return;
+      }
+
+      // イベント追加
+      session.events.push(event);
+      session.eventCount++;
+      session.eventBreakdown[eventType] = (session.eventBreakdown[eventType] || 0) + 1;
+      session.channelActivity[externalChannel.toString()] = (session.channelActivity[externalChannel.toString()] || 0) + 1;
+      session.lastInputAt = Date.now();
+
+      // 最初の入力で状態変更
+      if (session.status === 'waiting_for_input') {
+        session.status = 'recording';
+        session.firstInputAt = Date.now();
+        // idleTimer をクリア
+        if (session.idleTimer) {
+          clearTimeout(session.idleTimer);
+          session.idleTimer = undefined;
+        }
+      }
+
+      // サイレンスタイマーをリセット（新しい入力があったため）
+      startSilenceTimer(session);
+    }
+
+    if (name === 'start_continuous_recording') {
+      await loadMidi();
+      if (!MidiInput) throw new Error('node-midi not available for input');
+      
+      // パラメータ解析
+      const ppq = Number.isFinite(Number(args?.ppq)) ? Math.max(96, Math.min(1920, Number(args.ppq))) : 480;
+      const maxDurationMs = Number.isFinite(Number(args?.maxDurationMs)) ? Math.max(1000, Math.min(3600000, Number(args.maxDurationMs))) : 300000;
+      const idleTimeoutMs = Number.isFinite(Number(args?.idleTimeoutMs)) ? Math.max(1000, Math.min(120000, Number(args.idleTimeoutMs))) : 30000;
+      const silenceTimeoutMs = Number.isFinite(Number(args?.silenceTimeoutMs)) ? Math.max(1000, Math.min(60000, Number(args.silenceTimeoutMs))) : 10000;
+      const reqPortName: string | undefined = args?.portName;
+      const channelFilter: number[] | undefined = Array.isArray(args?.channelFilter) ? args.channelFilter.filter((n: any) => Number.isInteger(n) && n >= 1 && n <= 16) : undefined;
+      const eventTypeFilter: string[] | undefined = Array.isArray(args?.eventTypeFilter) ? args.eventTypeFilter.filter((s: any) => typeof s === 'string' && ['note', 'cc', 'pitchBend', 'program'].includes(s)) : undefined;
+
+      // 入力ポート決定
+      const temp = new MidiInput();
+      const count = typeof temp.getPortCount === 'function' ? temp.getPortCount() : 0;
+      const ports: string[] = [];
+      for (let i = 0; i < count; i++) {
+        try {
+          ports.push(temp.getPortName(i) || `input:${i}`);
+        } catch {
+          ports.push(`input:${i}`);
+        }
+      }
+      
+      let index = 0;
+      if (reqPortName) {
+        const found = ports.findIndex(p => p === reqPortName || p.includes(reqPortName));
+        if (found >= 0) index = found;
+        else throw new Error(`input port not found: ${reqPortName}`);
+      }
+
+      const actualPortName = ports[index] || 'unknown';
+      
+      // セッション作成
+      const session = createContinuousSession(
+        actualPortName,
+        ppq,
+        maxDurationMs,
+        idleTimeoutMs,
+        silenceTimeoutMs,
+        channelFilter,
+        eventTypeFilter
+      );
+
+      // MIDI入力設定
+      const inp = temp; // reuse temp instance
+      try {
+        inp.openPort(index);
+      } catch {
+        try { inp.closePort(); } catch {}
+        throw new Error(`failed to open input port index=${index}`);
+      }
+
+      try {
+        if (typeof inp.ignoreTypes === 'function') inp.ignoreTypes(false, false, false);
+      } catch {}
+
+      session.inputInstance = inp;
+
+      // メッセージハンドラ設定
+      const handler = (delta: number, message: number[]) => {
+        try {
+          const now = Date.now();
+          const relativeMs = now - session.startedAt;
+          
+          if (session.status === 'waiting_for_input' || session.status === 'recording') {
+            addEventToSession(session, message, relativeMs);
+          }
+        } catch {
+          // エラーは握りつぶし
+        }
+      };
+
+      inp.on('message', handler);
+
+      // タイマー設定
+      session.idleTimer = setTimeout(async () => {
+        const currentSession = continuousRecordingRegistry.get(session.id);
+        if (currentSession && currentSession.status === 'waiting_for_input') {
+          currentSession.status = 'timeout_idle';
+          finalizeSession(currentSession, 'idle_timeout');
+          
+          // 自動SMF保存
+          try {
+            await saveContinuousRecordingAsSmf(currentSession);
+          } catch (error) {
+            console.error('Failed to auto-save recording on idle timeout:', error);
+          }
+          
+          continuousRecordingRegistry.set(currentSession.id, currentSession);
+        }
+      }, idleTimeoutMs);
+
+      session.maxDurationTimer = setTimeout(async () => {
+        const currentSession = continuousRecordingRegistry.get(session.id);
+        if (currentSession && (currentSession.status === 'waiting_for_input' || currentSession.status === 'recording')) {
+          currentSession.status = 'timeout_max_duration';
+          finalizeSession(currentSession, 'max_duration');
+          
+          // 自動SMF保存
+          try {
+            await saveContinuousRecordingAsSmf(currentSession);
+          } catch (error) {
+            console.error('Failed to auto-save recording on max duration timeout:', error);
+          }
+          
+          continuousRecordingRegistry.set(currentSession.id, currentSession);
+        }
+      }, maxDurationMs);
+
+      // レジストリ登録
+      continuousRecordingRegistry.set(session.id, session);
+
+      return wrap({
+        ok: true,
+        recordingId: session.id,
+        portName: actualPortName,
+        ppq,
+        maxDurationMs,
+        idleTimeoutMs,
+        silenceTimeoutMs,
+        channelFilter,
+        eventTypeFilter: session.eventTypeFilter,
+        startedAt: new Date(session.startedAt).toISOString(),
+        status: session.status
+      }) as any;
+    }
+
+    if (name === 'get_continuous_recording_status') {
+      const recordingId: string | undefined = args?.recordingId;
+      if (!recordingId) throw new Error("'recordingId' is required for get_continuous_recording_status");
+      
+      const session = continuousRecordingRegistry.get(recordingId);
+      if (!session) throw new Error(`recording session not found: ${recordingId}`);
+
+      const now = Date.now();
+      const currentDurationMs = now - session.startedAt;
+      
+      // タイムアウトの自動チェック（状態遷移は各タイマーが担当）
+      let timeUntilTimeout = 0;
+      if (session.status === 'waiting_for_input') {
+        const idleRemaining = Math.max(0, session.idleTimeoutMs - currentDurationMs);
+        const maxDurationRemaining = Math.max(0, session.maxDurationMs - currentDurationMs);
+        timeUntilTimeout = Math.min(idleRemaining, maxDurationRemaining);
+      } else if (session.status === 'recording' && session.lastInputAt) {
+        const silenceElapsed = now - session.lastInputAt;
+        const silenceRemaining = Math.max(0, session.silenceTimeoutMs - silenceElapsed);
+        const maxDurationRemaining = Math.max(0, session.maxDurationMs - currentDurationMs);
+        timeUntilTimeout = Math.min(silenceRemaining, maxDurationRemaining);
+      } else if (session.status === 'recording') {
+        // recording状態だがlastInputAtがない場合（通常起こらないが安全のため）
+        timeUntilTimeout = Math.max(0, session.maxDurationMs - currentDurationMs);
+      }
+
+      return wrap({
+        ok: true,
+        recordingId: session.id,
+        status: session.status,
+        startedAt: new Date(session.startedAt).toISOString(),
+        firstInputAt: session.firstInputAt ? new Date(session.firstInputAt).toISOString() : undefined,
+        lastInputAt: session.lastInputAt ? new Date(session.lastInputAt).toISOString() : undefined,
+        currentDurationMs,
+        eventCount: session.eventCount,
+        eventBreakdown: session.eventBreakdown,
+        channelActivity: session.channelActivity,
+        timeUntilTimeout,
+        reason: session.reason,
+        estimatedFileSizeBytes: session.eventCount * 8 + 1024, // 概算
+        portName: session.inputPortName
+      }) as any;
+    }
+
+    if (name === 'stop_continuous_recording') {
+      const recordingId: string | undefined = args?.recordingId;
+      const requestedName: string | undefined = args?.name;
+      const overwrite: boolean = args?.overwrite ?? false;
+
+      if (!recordingId) throw new Error("'recordingId' is required for stop_continuous_recording");
+      
+      const session = continuousRecordingRegistry.get(recordingId);
+      if (!session) throw new Error(`recording session not found: ${recordingId}`);
+
+      // 手動終了の場合、セッション状態を更新
+      if (!session.status.startsWith('timeout_') && session.status !== 'completed') {
+        session.status = 'stopped_manually';
+        finalizeSession(session, 'manual_stop');
+      }
+
+      // SMF生成・保存
+      const savedFile = await saveContinuousRecordingAsSmf(session, requestedName, overwrite);
+
+      // レジストリから削除（クリーンアップ）
+      continuousRecordingRegistry.delete(recordingId);
+
+      return wrap({
+        ok: true,
+        recordingId,
+        fileId: savedFile.fileId,
+        name: savedFile.name,
+        path: savedFile.path,
+        bytes: savedFile.bytes,
+        durationMs: savedFile.durationMs,
+        eventCount: savedFile.eventCount,
+        ppq: savedFile.ppq,
+        trackCount: savedFile.trackCount,
+        reason: session.reason || 'manual_stop',
+        recordingStartedAt: new Date(session.startedAt).toISOString(),
+        recordingEndedAt: session.lastInputAt ? new Date(session.lastInputAt).toISOString() : new Date(session.startedAt).toISOString(),
+        savedAt: new Date().toISOString()
+      }) as any;
     }
 
     // insert_sustain: 指定範囲に CC64 (Sustain) on/off を挿入
