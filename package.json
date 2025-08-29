@@ -8,8 +8,9 @@
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-  "test": "vitest run --reporter=dot",
-  "smoke:e2e": "node scripts/mcp_smoke_e2e.mjs"
+    "pretest": "npm run build",
+    "test": "vitest run --reporter=dot",
+    "smoke:e2e": "node scripts/mcp_smoke_e2e.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -24,8 +25,8 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@tonejs/midi": "^2.0.28",
-  "midi": "^2.0.0",
-  "zod": "^3.23.8"
+    "midi": "^2.0.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

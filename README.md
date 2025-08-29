@@ -132,6 +132,40 @@ Score DSL → JSON MIDI コンパイル時に、演奏表現を補助するCCイ
 - get_continuous_recording_status: 記録セッションの現在状態・進捗・メトリクス取得（リアルタイム監視）
 - stop_continuous_recording: 継続記録セッション手動終了・SMF生成保存・fileId発行
 - list_continuous_recordings: 進行中・完了済み記録セッション一覧取得（デバッグ・監視用）
+- extract_bars: SMFファイルの指定小節範囲をJSON MIDI形式で抽出（相対tick変換）
+- replace_bars: SMFファイルの指定小節範囲をJSONデータで置換（部分編集）
+- clean_midi: 既存SMF内の重複テンポ/拍子/調号メタやチャネル分割トラックを正規化し新規fileIdで保存（クリーン再構築）
+
+### 精密小節範囲再生 (R11: extractionMode:"precise")
+`play_smf` に `startBar` / `endBar` を与えると、R11 以降は単純 ms 範囲切出ではなく「抽出モード」が動作します。
+
+基本動作（precise モード）:
+1. 対象SMFを JSON MIDI に解析
+2. 指定 bar 範囲のイベントを抽出（tick を 0 起点へ正規化しない: 内部では相対化→再エンコード）
+3. 範囲開始前に有効だった状態系イベント（tempo / timeSignature / pitchBend / CC64 / 任意 CC controller 値）を 0tick にシード
+4. 跨ぎノート: 範囲前で発音し範囲内で鳴り続けるノートは 0tick に合成 NoteOn（duration 端調整）を生成（未実装: TODO）
+5. (予定) 範囲終端を越える保持ノートに NoteOff 合成（安全終了）
+
+レスポンス拡張:
+```jsonc
+{
+   "ok": true,
+   "extractionMode": "precise", // 精密抽出成功時
+   "scheduledEvents": 123,
+   "debug": { "extracted": { /* 0tick シード含む内部JSON */ } }
+}
+```
+
+フォールバック:
+- 環境変数 `MCP_MIDI_PLAY_SMF_BAR_MODE=simple` を設定すると旧ロジック（簡易: tempo/拍子変化・CCシード無し）へ切替 (実装予定)。
+
+現状の実装状況:
+- pitchBend / CC64 / 任意 CC のシード済み (RED→GREEN テストで保証)
+- 複数テンポ変化中の bar2 抽出, 拍子変更跨ぎ, sustain OFF 跨ぎ, 跨ぎノート合成は RED テスト追加予定
+
+注意:
+- Score DSL v1 は小節途中テンポ変更を未サポート。精密抽出の検証では JSON MIDI 直接投入でテンポ変化を構築。
+
 
 戻り値はClaude互換の`content: [{type:'text', text: ...}]`を含みます。
 
@@ -150,6 +184,12 @@ Score DSL → JSON MIDI コンパイル時に、演奏表現を補助するCCイ
    - 出力: `{ fileId, name, path, bytes, insertedAtTick }`
    - 入力: `{ fileId }`
    - 出力: `{ json: <JSON MIDI>, bytes, trackCount, eventCount }`
+- clean_midi
+   - 目的: 累積 append/replace で増殖した重複グローバルメタ(tempo/time/key)やチャネル毎に分断された多数トラックを整理。
+   - 入力: `{ fileId: string }`
+   - 出力: `{ fileId, path, bytes, original:{trackCount,eventCount}, cleaned:{trackCount,eventCount}, removedDuplicateMeta, mergedTracks }`
+   - 処理: 最初に出現した tempo/time/key を採用し以降削除。channel番号でトラック統合（非チャネルイベントは track0へ）。tick順で再ソート。
+   - 推奨タイミング: 1) 大量追記後の最適化 2) 予期せぬ trackCount 急増検知時。
 - play_smf（dryRun推奨→実再生）
    - 入力: `{ fileId, dryRun?: true|false, portName?: string, startMs?: number, stopMs?: number, schedulerLookaheadMs?: number, schedulerTickMs?: number }`
    - 出力: `dryRun:true` の場合 `{ scheduledEvents, totalDurationMs }` を返却。実再生時は `playbackId` を発行。
@@ -159,6 +199,14 @@ Score DSL → JSON MIDI コンパイル時に、演奏表現を補助するCCイ
    - 入力: `{ notes: (string[]|number[]), velocity?: number(1-127)=100, durationMs?: number(20-10000)=500, channel?: number(1-16)=1, program?: number(0-127), portName?: string, transpose?: number, dryRun?: boolean }`（外部表記。内部では 0〜15 にマップ）
    - 出力: `{ playbackId, scheduledNotes, durationMs, portName? }`（dryRun時は即done相当）
    - 例: `{ tool:"trigger_notes", arguments:{ notes:["C4","E4","G4"], velocity:96, durationMs:200, portName:"IAC" } }`
+- extract_bars（小節範囲抽出）
+   - 入力: `{ fileId: string, startBar: number(>=1), endBar: number(>=1), format?: "json_midi_v1" }`
+   - 出力: `{ ok:true, startBar, endBar, startTick, endTick, eventCount, json, durationTicks }`
+   - 例: `{ tool:"extract_bars", arguments:{ fileId:"abc123", startBar:2, endBar:3 } }`
+- replace_bars（小節範囲置換）
+   - 入力: `{ fileId: string, startBar: number(>=1), endBar: number(>=1), json: object, format?: "json_midi_v1", outputName?: string }`
+   - 出力: `{ ok:true, newFileId, name, startBar, endBar, originalFileId }`
+   - 例: `{ tool:"replace_bars", arguments:{ fileId:"abc123", startBar:1, endBar:1, json:{...}, outputName:"modified.mid" } }`
 
 #### 単発リアルタイムキャプチャ (single capture)
 和音あるいは単音を「最初のNoteOn発生から onsetWindowMs 以内」にまとめて 1 つの結果として返す軽量キャプチャ。全ノートOff後のサイレンス、または maxWaitMs 経過で確定。
@@ -309,6 +357,38 @@ MIDI入力デバイスから演奏全体を継続的に記録し、自動また�
 - メモリ上限: セッションあたり10MB推定
 - 自動削除: 完了から24時間後に未保存セッション削除
 - ファイル命名: デフォルト `recording-YYYY-MM-DD-HHmmss.mid`、重複時は番号suffix付与
+
+#### 小節範囲編集 (bar-based editing)
+既存SMFファイルの指定小節範囲を抽出・置換する部分編集機能。MCPクライアントから曲を修正しながら作曲できます。
+
+**主要機能**:
+- **小節抽出**: 指定小節範囲をJSON MIDI形式で抽出（相対tick変換）
+- **小節置換**: 指定小節範囲をJSONデータで置換（既存ファイルの一部書き換え）
+- **タイムシグネチャ対応**: 4/4以外の拍子記号を考慮した小節計算
+- **SMF互換**: 元ファイルのPPQ・メタ情報を維持
+
+**基本的な使用例**:
+```jsonc
+// 1. 2小節のメロディから1小節目を抽出
+{ "tool":"extract_bars", "arguments": {
+   "fileId": "abc123", "startBar": 1, "endBar": 1, "format": "json_midi_v1" 
+}}
+// -> { ok:true, startBar:1, endBar:1, startTick:0, endTick:1920, eventCount:3, json:{...} }
+
+// 2. 抽出したJSONを修正してから置換
+{ "tool":"replace_bars", "arguments": {
+   "fileId": "abc123", "startBar": 1, "endBar": 1,
+   "json": { "ppq":480, "tracks":[...] }, "format": "json_midi_v1",
+   "outputName": "modified-melody.mid"
+}}
+// -> { ok:true, newFileId:"def456", name:"modified-melody.mid", startBar:1, endBar:1 }
+```
+
+**注意事項**:
+- 小節番号は1から開始（1-indexed）
+- 抽出されたJSONのtickは相対値（抽出範囲の開始を0とする）
+- 置換時は元のSMF構造に合わせてイベントが統合される
+- 複数トラックのSMFでも、JSON変換時に統合された構造で処理される
 
 
 ### JSONイベント仕様（抜粋）

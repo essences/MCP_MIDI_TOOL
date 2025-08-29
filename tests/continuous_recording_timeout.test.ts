@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 
-describe('Continuous Recording Timeout', () => {
+// NOTE: フレーク対策: 並列実行で idle/maxDuration の実時間計測が遅延し 8-10s の test timeout を超過したため
+// describe.sequential を使用しテスト間の並列負荷を避ける。
+describe.sequential('Continuous Recording Timeout', () => {
   let serverProcess: ChildProcess;
   let serverReady = false;
   
@@ -10,6 +12,9 @@ describe('Continuous Recording Timeout', () => {
     serverProcess = spawn('node', [path.resolve('./dist/index.js')], {
       stdio: ['pipe', 'pipe', 'pipe']
     });
+    if (serverProcess.stderr) {
+      serverProcess.stderr.on('data', d => console.error('[server:stderr]', d.toString()));
+    }
     
     await new Promise((resolve) => {
       const timeout = setTimeout(resolve, 2000);
@@ -98,7 +103,8 @@ describe('Continuous Recording Timeout', () => {
       ? JSON.parse(startResponse.result.content[0].text)
       : startResponse.result;
     
-    expect(startResult.ok).toBe(true);
+  if (!startResult.ok) console.error('[diagnostic] idle test start failed:', startResult);
+  expect(startResult.ok).toBe(true);
     const recordingId = startResult.recordingId;
 
     // 1秒待機（まだidleタイムアウト前）
@@ -152,7 +158,8 @@ describe('Continuous Recording Timeout', () => {
       ? JSON.parse(startResponse.result.content[0].text)
       : startResponse.result;
     
-    expect(startResult.ok).toBe(true);
+  if (!startResult.ok) console.error('[diagnostic] maxDuration test start failed:', startResult);
+  expect(startResult.ok).toBe(true);
     const recordingId = startResult.recordingId;
 
     // 2秒待機（まだmaxDurationタイムアウト前）
@@ -221,6 +228,9 @@ describe('Continuous Recording Timeout', () => {
         ? JSON.parse(status.result.content[0].text)
         : status.result;
 
+      if (statusResult.status !== 'timeout_idle' || statusResult.reason !== 'idle_timeout') {
+        console.error('[diagnostic] cleanup stability mismatch:', statusResult);
+      }
       expect(statusResult.status).toBe('timeout_idle');
       expect(statusResult.reason).toBe('idle_timeout');
       
@@ -242,14 +252,15 @@ describe('Continuous Recording Timeout', () => {
       }
     });
 
-    const startResult = startResponse.result.content?.[0]?.text 
+  const startResult = startResponse.result.content?.[0]?.text 
       ? JSON.parse(startResponse.result.content[0].text)
       : startResponse.result;
     
-    const recordingId = startResult.recordingId;
+  const recordingId = startResult.recordingId;
+  if (!startResult.ok) console.error('[diagnostic] timeUntilTimeout start failed:', startResult);
 
     // 1秒間隔で3回測定し、timeUntilTimeoutが適切に減少することを確認
-    const measurements = [];
+  const measurements: { timeUntilTimeout: number; currentDurationMs: number }[] = [];
     for (let i = 0; i < 3; i++) {
       const status = await sendMCPRequest('tools/call', {
         name: 'get_continuous_recording_status',

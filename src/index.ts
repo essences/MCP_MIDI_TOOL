@@ -91,14 +91,17 @@ async function main() {
     { name: "store_midi", description: "base64のMIDIを保存し、fileIdを返す", inputSchema: { type: "object", properties: { base64: { type: "string" }, name: { type: "string" } }, required: ["base64"] } },
   { name: "json_to_smf", description: "JSON曲データをSMFにコンパイルし保存", inputSchema: { type: "object", properties: { json: { anyOf: [ { type: "object" }, { type: "string" } ] }, format: { type: "string", enum: ["json_midi_v1", "score_dsl_v1"] }, name: { type: "string" } , overwrite: { type: "boolean" } }, required: ["json"] } },
   { name: "smf_to_json", description: "SMFを解析してJSON曲データに変換", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
-  { name: "append_to_smf", description: "既存SMFへJSON/Score DSLチャンクを追記（指定tick/末尾）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, json: { anyOf: [ { type: "object" }, { type: "string" } ] }, format: { type: "string", enum: ["json_midi_v1", "score_dsl_v1"] }, atTick: { type: "number" }, atEnd: { type: "boolean" }, gapTicks: { type: "number" }, trackIndex: { type: "number" }, outputName: { type: "string" } }, required: ["fileId", "json"] } },
+  { name: "clean_midi", description: "SMF内の重複メタ/トラックを正規化して新規fileId発行", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
+  { name: "append_to_smf", description: "既存SMFへJSON/Score DSLチャンクを追記（指定tick/末尾）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, json: { anyOf: [ { type: "object" }, { type: "string" } ] }, format: { type: "string", enum: ["json_midi_v1", "score_dsl_v1"] }, atTick: { type: "number" }, atEnd: { type: "boolean" }, gapTicks: { type: "number" }, trackIndex: { type: "number" }, preserveTrackStructure: { type: "boolean" }, trackMapping: { type: "array", items: { type: "number" } }, outputName: { type: "string" } }, required: ["fileId", "json"] } },
   { name: "insert_sustain", description: "CC64(サスティン)のON/OFFを範囲に挿入", inputSchema: { type: "object", properties: { fileId: { type: "string" }, ranges: { type: "array", items: { type: "object", properties: { startTick: { type: "number" }, endTick: { type: "number" }, channel: { type: "number" }, trackIndex: { type: "number" }, valueOn: { type: "number" }, valueOff: { type: "number" } }, required: ["startTick", "endTick"] } } }, required: ["fileId", "ranges"] } },
   { name: "insert_cc", description: "任意のCC番号の値を範囲に挿入（ON/OFF相当の2値）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, controller: { type: "number" }, ranges: { type: "array", items: { type: "object", properties: { startTick: { type: "number" }, endTick: { type: "number" }, channel: { type: "number" }, trackIndex: { type: "number" }, valueOn: { type: "number" }, valueOff: { type: "number" } }, required: ["startTick", "endTick"] } } }, required: ["fileId", "controller", "ranges"] } },
+  { name: "extract_bars", description: "SMFファイルの指定小節範囲をJSON MIDI形式で抽出", inputSchema: { type: "object", properties: { fileId: { type: "string" }, startBar: { type: "number", minimum: 1 }, endBar: { type: "number", minimum: 1 }, format: { type: "string", enum: ["json_midi_v1", "score_dsl_v1"], default: "json_midi_v1" } }, required: ["fileId", "startBar", "endBar"] } },
+  { name: "replace_bars", description: "SMFファイルの指定小節範囲をJSONデータで置換", inputSchema: { type: "object", properties: { fileId: { type: "string" }, startBar: { type: "number", minimum: 1 }, endBar: { type: "number", minimum: 1 }, json: {}, format: { type: "string", enum: ["json_midi_v1", "score_dsl_v1"], default: "json_midi_v1" }, outputName: { type: "string" } }, required: ["fileId", "startBar", "endBar", "json"] } },
         { name: "get_midi", description: "fileIdでMIDIメタ情報と任意でbase64を返す", inputSchema: { type: "object", properties: { fileId: { type: "string" }, includeBase64: { type: "boolean" } }, required: ["fileId"] } },
         { name: "list_midi", description: "保存済みMIDIの一覧（ページング）", inputSchema: { type: "object", properties: { limit: { type: "number" }, offset: { type: "number" } } } },
         { name: "export_midi", description: "fileIdをdata/exportへコピー", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
         { name: "list_devices", description: "MIDI出力デバイス一覧（暫定）", inputSchema: { type: "object", properties: {} } },
-  { name: "play_smf", description: "SMFを解析し再生（dryRunで送出なし解析のみ）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" }, startMs: { type: "number" }, stopMs: { type: "number" }, dryRun: { type: "boolean" }, schedulerLookaheadMs: { type: "number" }, schedulerTickMs: { type: "number" } }, required: ["fileId"] } },
+  { name: "play_smf", description: "SMFを解析し再生（dryRunで送出なし解析のみ）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" }, startMs: { type: "number" }, stopMs: { type: "number" }, startBar: { type: "number" }, endBar: { type: "number" }, dryRun: { type: "boolean" }, schedulerLookaheadMs: { type: "number" }, schedulerTickMs: { type: "number" } }, required: ["fileId"] } },
   { name: "get_playback_status", description: "再生ステータスを取得（進捗・総尺・デバイスなど）", inputSchema: { type: "object", properties: { playbackId: { type: "string" } }, required: ["playbackId"] } },
   { name: "playback_midi", description: "MIDI再生開始（PoC: durationMsで長さ指定可）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, portName: { type: "string" }, durationMs: { type: "number" } }, required: ["fileId"] } },
     { name: "trigger_notes", description: "単発でノート（単音/和音）を即時送出（耳トレ用・高速ワンショット）", inputSchema: { type: "object", properties: { notes: { anyOf: [ { type: "array", items: { type: "string" } }, { type: "array", items: { type: "number" } } ] }, velocity: { type: "number" }, durationMs: { type: "number" }, channel: { type: "number" }, program: { type: "number" }, portName: { type: "string" }, transpose: { type: "number" }, dryRun: { type: "boolean" } }, required: ["notes"] } },
@@ -243,7 +246,9 @@ async function main() {
 
       // 実送出
       let portNameResolved: string | undefined;
-      try {
+  // extractionMode を外側スコープで保持（dryRun 応答にも含める）
+  let extractionMode: 'simple' | 'precise' = 'simple';
+  try {
         const { MidiOutput: OutCls } = await loadMidi();
         if (!OutCls) {
           warnings.push('node-midi not available: trigger is a no-op');
@@ -358,9 +363,10 @@ async function main() {
     if (name === "json_to_smf") {
       let json = args?.json;
       const format: string | undefined = typeof args?.format === 'string' ? String(args.format) : undefined;
-      if (typeof json === 'string') {
-        // 文字列で来た場合はまずJSON.parseを試みる（どちらのフォーマットでもJSONである想定）
-        try { json = JSON.parse(json); } catch { /* 後続のバリデーションで明示エラー */ }
+      const originalInputIsString = typeof json === 'string';
+      if (originalInputIsString) {
+        // まずJSON.parseを試みる（失敗したら DSL 文字列の可能性）
+        try { json = JSON.parse(json as string); } catch { /* 後段で DSL パスへ */ }
       }
       const fileNameInput: string | undefined = args?.name;
       if (!json) throw new Error("'json' is required for json_to_smf");
@@ -377,8 +383,64 @@ async function main() {
       } else if (format === 'score_dsl_v1') {
         // 明示: Score DSL v1 をコンパイル→検証
         try {
-          const compiled = compileScoreToJsonMidi(json);
-          song = zSong.parse(compiled);
+          let inputForCompile = json;
+          let directJsonMidi: any | undefined;
+          // 簡易 DSL 文字列 (旧テスト互換) をオブジェクト形式へ変換
+          if (originalInputIsString && typeof json === 'string') {
+            try {
+              const lines = (json as string).split(/\r?\n/).map(l=>l.trim()).filter(l=>l.length>0);
+              let title: string|undefined; let tempo: number|undefined; let timeSig: {numerator:number;denominator:number}|undefined;
+              const trackSpecs: { name:string; tokens:string[] }[] = [];
+              for (const ln of lines) {
+                if (ln.startsWith('#title:')) title = ln.slice(7).trim();
+                else if (ln.startsWith('#tempo:')) tempo = Number(ln.slice(7).trim());
+                else if (ln.startsWith('#time:')) { const m = ln.slice(6).trim().match(/(\d+)\/(\d+)/); if (m) timeSig = { numerator:Number(m[1]), denominator:Number(m[2]) }; }
+                else {
+                  const m = ln.match(/^(\w+):\s*(.+)$/); if (m) { trackSpecs.push({ name:m[1], tokens:m[2].split(/\s+/) }); }
+                }
+              }
+              const ppq = 480;
+              const numerator = timeSig?.numerator ?? 4; const denominator = (timeSig?.denominator ?? 4) as 1|2|4|8|16;
+              const tracks:any[] = [];
+              const barTicks = ppq * numerator; // 4/4 固定で denominator=4 前提
+              for (const ts of trackSpecs) {
+                const events:any[] = [];
+                let curBar = 1; let curTickInBar = 0;
+                let i=0;
+                while (i < ts.tokens.length) {
+                  const token = ts.tokens[i];
+                  if (token === '|') { curBar++; curTickInBar = 0; i++; continue; }
+                  const lenToken = ts.tokens[i+1];
+                  if (!lenToken) break;
+                  const lenMap: Record<string, number> = { '8': Math.round(ppq/2), '4': ppq, '2': ppq*2, '1': ppq*4 };
+                  const durTicks = lenMap[lenToken] ?? Math.round(ppq/2);
+                  const globalTick = (curBar-1)*barTicks + curTickInBar;
+                  // note name to midi (simple)
+                  const m = /^([A-Ga-g])(#|b)?(\d)$/.exec(token.trim());
+                  let pitch: number | undefined;
+                  if (m){
+                    const names=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+                    let base = names.indexOf((m[1].toUpperCase())+(m[2]||''));
+                    if (base===-1){ const enh: any = { Db:'C#', Eb:'D#', Gb:'F#', Ab:'G#', Bb:'A#' }; const k = (m[1].toUpperCase())+(m[2]||''); if (enh[k]) base = names.indexOf(enh[k]); }
+                    const oct = Number(m[3]); if (base>=0 && Number.isFinite(oct)) pitch = base + (oct+1)*12;
+                  }
+                  if (pitch !== undefined) {
+                    events.push({ type:'note', tick: globalTick, pitch, velocity:80, duration: durTicks });
+                  }
+                  curTickInBar += durTicks;
+                  i += 2;
+                }
+                tracks.push({ name: ts.name, channel:0, program:0, events });
+              }
+              directJsonMidi = { format:1, ppq, tracks };
+            } catch {/* fallback: そのまま compile */}
+          }
+          if (directJsonMidi) {
+            song = zSong.parse(directJsonMidi);
+          } else {
+            const compiled = compileScoreToJsonMidi(inputForCompile);
+            song = zSong.parse(compiled);
+          }
         } catch (e: any) {
           const issues = e?.issues?.map?.((i: any)=> `${i.path?.join?.('.')}: ${i.message}`).join('; ');
           throw new Error(`score_dsl_v1 compile/validation failed: ${issues || e?.message || String(e)}`);
@@ -454,6 +516,19 @@ async function main() {
   return wrap({ ok: true, json, bytes, trackCount, eventCount }) as any;
     }
 
+    // clean_midi: 重複メタ/チャネル別トラック統合（新規ファイル生成）
+    if (name === "clean_midi") {
+      const fileId: string | undefined = args?.fileId;
+      if (!fileId) throw new Error("'fileId' is required for clean_midi");
+      let item: ItemRec | undefined = inMemoryIndex.get(fileId);
+      if (!item) item = (await getItemById(fileId)) as ItemRec | undefined;
+      if (!item) throw new Error(`fileId not found: ${fileId}`);
+      const absPath = path.resolve(resolveBaseDir(), item.path);
+      const { cleanMidiFile } = await import('./cleanMidi.js');
+      const result = await cleanMidiFile(absPath);
+      return wrap({ ok: true, ...result });
+    }
+
     // append_to_smf: 既存SMFにJSON/DSLのチャンクを追記
     if (name === "append_to_smf") {
       const fileId: string | undefined = args?.fileId;
@@ -496,6 +571,8 @@ async function main() {
       const atTickArg = Number.isFinite(Number(args?.atTick)) ? (args.atTick|0) : undefined;
       const gapTicks = Number.isFinite(Number(args?.gapTicks)) ? Math.max(0, args.gapTicks|0) : 0;
       const trackIndex = Number.isFinite(Number(args?.trackIndex)) ? Math.max(0, args.trackIndex|0) : undefined;
+      const preserveTrackStructure = !!args?.preserveTrackStructure;
+      const trackMapping = Array.isArray(args?.trackMapping) ? args.trackMapping.map((n: any) => Math.max(0, Number(n) || 0)) : undefined;
 
       // 既存末尾tickを計測
       const trackEndTicks: number[] = baseJson.tracks.map((tr: any) => {
@@ -510,29 +587,78 @@ async function main() {
       });
       const globalEnd = trackEndTicks.length ? Math.max(...trackEndTicks) : 0;
 
-      // 追加対象トラックの選定（指定なければ「最初の音源トラック or 0」）
-      let tgt = trackIndex;
-      if (!Number.isFinite(tgt as number)) {
-        const cand = baseJson.tracks.findIndex((tr: any)=> (tr.events||[]).some((e:any)=> e.type!=="meta.tempo" && e.type!=="meta.timeSignature" && e.type!=="meta.keySignature"));
-        tgt = (cand >= 0 ? cand : 0);
+      // 4) 挿入オフセットの算出（グローバルまたは指定トラックの末尾）
+      let insertTick: number;
+      if (preserveTrackStructure) {
+        // トラック構造保持モード：グローバル末尾基準
+        insertTick = atEnd ? globalEnd + gapTicks : (atTickArg ?? (globalEnd + gapTicks));
+      } else {
+        // 従来モード：単一トラック指定
+        let tgt = trackIndex;
+        if (!Number.isFinite(tgt as number)) {
+          const cand = baseJson.tracks.findIndex((tr: any)=> (tr.events||[]).some((e:any)=> e.type!=="meta.tempo" && e.type!=="meta.timeSignature" && e.type!=="meta.keySignature"));
+          tgt = (cand >= 0 ? cand : 0);
+        }
+        if (!baseJson.tracks[tgt!]) baseJson.tracks[tgt!] = { events: [] };
+        insertTick = atEnd ? (trackEndTicks[tgt!] ?? globalEnd) + gapTicks : (atTickArg ?? (globalEnd + gapTicks));
       }
-      if (!baseJson.tracks[tgt!]) baseJson.tracks[tgt!] = { events: [] };
-
-      // 4) 挿入オフセットの算出
-      const insertTick = atEnd ? (trackEndTicks[tgt!] ?? globalEnd) + gapTicks : (atTickArg ?? (globalEnd + gapTicks));
 
       // 5) 追加曲の各イベントを insertTick へ相対シフトして追記
-      const dst = baseJson.tracks[tgt!];
-      for (const tr of addSong.tracks) {
-        for (const ev of tr.events) {
-          if (ev.type === 'meta.tempo' || ev.type === 'meta.timeSignature' || ev.type === 'meta.keySignature') {
-            // グローバルメタは track0 に入れる（tickはそのまま/または末尾配置も可）。今回は相対で末尾に付ける
-            const tick = insertTick + (ev.tick|0);
-            if (!baseJson.tracks[0]) baseJson.tracks[0] = { events: [] };
-            baseJson.tracks[0].events.push({ ...ev, tick });
+      if (preserveTrackStructure) {
+        // トラック構造保持モード：各トラックを個別に追記
+        for (let srcTrackIdx = 0; srcTrackIdx < addSong.tracks.length; srcTrackIdx++) {
+          const srcTrack = addSong.tracks[srcTrackIdx];
+          let dstTrackIdx: number;
+          
+          if (trackMapping && trackMapping[srcTrackIdx] !== undefined) {
+            // 明示的マッピング指定
+            dstTrackIdx = trackMapping[srcTrackIdx];
           } else {
-            const tick = insertTick + (ev.tick|0);
-            dst.events.push({ ...ev, tick });
+            // 自動配置：既存トラック数から追記
+            dstTrackIdx = baseJson.tracks.length + srcTrackIdx;
+          }
+          
+          // 対象トラックを確保（配列の長さを動的に拡張）
+          while (baseJson.tracks.length <= dstTrackIdx) {
+            baseJson.tracks.push({ events: [] });
+          }
+          if (!baseJson.tracks[dstTrackIdx]) {
+            baseJson.tracks[dstTrackIdx] = { events: [] };
+          }
+          
+          for (const ev of srcTrack.events) {
+            if (ev.type === 'meta.tempo' || ev.type === 'meta.timeSignature' || ev.type === 'meta.keySignature') {
+              // グローバルメタは track0 に入れる
+              const tick = insertTick + (ev.tick|0);
+              if (!baseJson.tracks[0]) baseJson.tracks[0] = { events: [] };
+              baseJson.tracks[0].events.push({ ...ev, tick });
+            } else {
+              const tick = insertTick + (ev.tick|0);
+              baseJson.tracks[dstTrackIdx].events.push({ ...ev, tick });
+            }
+          }
+        }
+      } else {
+        // 従来モード：全トラックを1つに統合
+        let tgt = trackIndex;
+        if (!Number.isFinite(tgt as number)) {
+          const cand = baseJson.tracks.findIndex((tr: any)=> (tr.events||[]).some((e:any)=> e.type!=="meta.tempo" && e.type!=="meta.timeSignature" && e.type!=="meta.keySignature"));
+          tgt = (cand >= 0 ? cand : 0);
+        }
+        if (!baseJson.tracks[tgt!]) baseJson.tracks[tgt!] = { events: [] };
+        
+        const dst = baseJson.tracks[tgt!];
+        for (const tr of addSong.tracks) {
+          for (const ev of tr.events) {
+            if (ev.type === 'meta.tempo' || ev.type === 'meta.timeSignature' || ev.type === 'meta.keySignature') {
+              // グローバルメタは track0 に入れる
+              const tick = insertTick + (ev.tick|0);
+              if (!baseJson.tracks[0]) baseJson.tracks[0] = { events: [] };
+              baseJson.tracks[0].events.push({ ...ev, tick });
+            } else {
+              const tick = insertTick + (ev.tick|0);
+              dst.events.push({ ...ev, tick });
+            }
           }
         }
       }
@@ -1046,6 +1172,38 @@ async function main() {
       const usPerQuarter = 500000;
       const ticksPerMs = (ppq * 1000) / usPerQuarter;
       return Math.round(relativeMs * ticksPerMs);
+    }
+
+    // 小節計算ヘルパー関数
+    function barToTick(bar: number, ppq: number, timeSignature: { numerator: number; denominator: number } = { numerator: 4, denominator: 4 }): number {
+      // 小節1から開始（bar=1は tick=0）
+      const barIndex = bar - 1;
+      const ticksPerBeat = ppq * (4 / timeSignature.denominator); // 4分音符基準
+      const ticksPerBar = ticksPerBeat * timeSignature.numerator;
+      return Math.round(barIndex * ticksPerBar);
+    }
+
+    function tickToBar(tick: number, ppq: number, timeSignature: { numerator: number; denominator: number } = { numerator: 4, denominator: 4 }): number {
+      const ticksPerBeat = ppq * (4 / timeSignature.denominator);
+      const ticksPerBar = ticksPerBeat * timeSignature.numerator;
+      const barIndex = Math.floor(tick / ticksPerBar);
+      return barIndex + 1; // 小節1から開始
+    }
+
+    function extractTimeSignatureFromJson(jsonMidi: any): { numerator: number; denominator: number } {
+      // JSON MIDIからタイムシグネチャを抽出
+      if (jsonMidi?.tracks) {
+        for (const track of jsonMidi.tracks) {
+          if (track?.events) {
+            for (const event of track.events) {
+              if (event?.type === 'meta.timeSignature' && event.numerator && event.denominator) {
+                return { numerator: event.numerator, denominator: event.denominator };
+              }
+            }
+          }
+        }
+      }
+      return { numerator: 4, denominator: 4 }; // デフォルト4/4拍子
     }
 
     function addEventToSession(session: ContinuousRecordingSession, midiBytes: number[], relativeMs: number) {
@@ -1624,15 +1782,237 @@ async function main() {
       return wrap({ ok: true, fileId: item.id, name: item.name, path: relPath, bytes }) as any;
     }
 
+    // extract_bars: 指定小節範囲をJSON MIDI形式で抽出
+    if (name === "extract_bars") {
+      const fileId: string | undefined = args?.fileId;
+      const startBar: number | undefined = args?.startBar;
+      const endBar: number | undefined = args?.endBar;
+      const format: string = args?.format || "json_midi_v1";
+
+      if (!fileId) throw new Error("'fileId' is required for extract_bars");
+      if (!Number.isFinite(Number(startBar)) || Number(startBar) < 1) throw new Error("'startBar' must be >= 1");
+      if (!Number.isFinite(Number(endBar)) || Number(endBar) < 1) throw new Error("'endBar' must be >= 1");
+      if (Number(startBar) > Number(endBar)) throw new Error("'startBar' must be <= 'endBar'");
+
+      let item: ItemRec | undefined = inMemoryIndex.get(fileId);
+      if (!item) item = (await getItemById(fileId)) as ItemRec | undefined;
+      if (!item) throw new Error(`fileId not found: ${fileId}`);
+
+      const absPath = path.resolve(resolveBaseDir(), item.path);
+      const buf = await fs.readFile(absPath);
+      const json = await decodeSmfToJson(buf);
+
+      // タイムシグネチャを抽出
+      const timeSignature = extractTimeSignatureFromJson(json);
+      const ppq = json.ppq || 480;
+
+      // 小節範囲をtickに変換
+      const startTick = barToTick(Number(startBar), ppq, timeSignature);
+      const endTick = barToTick(Number(endBar) + 1, ppq, timeSignature); // 終了小節の次の小節の開始tick
+
+      // 指定範囲のイベントを抽出
+      const extractedJson = {
+        ppq,
+        tracks: json.tracks.map((track: any) => {
+          const filteredEvents = (track.events || [])
+            .filter((event: any) => {
+              const eventTick = event.tick || 0;
+              return eventTick >= startTick && eventTick < endTick;
+            })
+            .map((event: any) => ({
+              ...event,
+              tick: event.tick - startTick // 相対tickに変換
+            }));
+          
+          return {
+            ...track,
+            events: filteredEvents
+          };
+        })
+      };
+
+      // Score DSL形式が要求された場合は変換（将来拡張）
+      if (format === "score_dsl_v1") {
+        // 現在は未実装、JSON MIDI形式で返却
+        console.warn("Score DSL v1 export is not yet implemented, returning JSON MIDI v1");
+      }
+
+      return wrap({
+        ok: true,
+        fileId,
+        startBar: Number(startBar),
+        endBar: Number(endBar),
+        startTick,
+        endTick,
+        json: extractedJson,
+        ppq,
+        timeSignature,
+        eventCount: extractedJson.tracks.reduce((sum: number, track: any) => sum + (track.events?.length || 0), 0),
+        durationTicks: endTick - startTick
+      }) as any;
+    }
+
+    // replace_bars: 指定小節範囲をJSONデータで置換
+    if (name === "replace_bars") {
+      const fileId: string | undefined = args?.fileId;
+      const startBar: number | undefined = args?.startBar;
+      const endBar: number | undefined = args?.endBar;
+      const jsonData: any = args?.json;
+      const format: string = args?.format || "json_midi_v1";
+      const outputName: string | undefined = args?.outputName;
+
+      if (!fileId) throw new Error("'fileId' is required for replace_bars");
+      if (!Number.isFinite(Number(startBar)) || Number(startBar) < 1) throw new Error("'startBar' must be >= 1");
+      if (!Number.isFinite(Number(endBar)) || Number(endBar) < 1) throw new Error("'endBar' must be >= 1");
+      if (Number(startBar) > Number(endBar)) throw new Error("'startBar' must be <= 'endBar'");
+      if (!jsonData) throw new Error("'json' is required for replace_bars");
+
+      let item: ItemRec | undefined = inMemoryIndex.get(fileId);
+      if (!item) item = (await getItemById(fileId)) as ItemRec | undefined;
+      if (!item) throw new Error(`fileId not found: ${fileId}`);
+
+      const absPath = path.resolve(resolveBaseDir(), item.path);
+      const buf = await fs.readFile(absPath);
+      const originalJson = await decodeSmfToJson(buf);
+
+      // タイムシグネチャを抽出
+      const timeSignature = extractTimeSignatureFromJson(originalJson);
+      const ppq = originalJson.ppq || 480;
+
+      // 小節範囲をtickに変換
+      const startTick = barToTick(Number(startBar), ppq, timeSignature);
+      const endTick = barToTick(Number(endBar) + 1, ppq, timeSignature);
+
+      // 置換用JSONデータの処理
+      let replacementJson: any;
+      if (typeof jsonData === 'string') {
+        try {
+          replacementJson = JSON.parse(jsonData);
+        } catch {
+          throw new Error("Invalid JSON string in 'json' parameter");
+        }
+      } else {
+        replacementJson = jsonData;
+      }
+
+      // Score DSL形式の場合はコンパイル
+      if (format === "score_dsl_v1") {
+        try {
+          replacementJson = compileScoreToJsonMidi(replacementJson);
+        } catch (err: any) {
+          throw new Error(`Score DSL compilation failed: ${err.message}`);
+        }
+      }
+
+      // 置換処理：指定範囲のイベントを削除し、新しいイベントを追加
+      const modifiedJson = {
+        ...originalJson,
+        tracks: originalJson.tracks.map((track: any, trackIndex: number) => {
+          // 指定範囲外のイベントを保持
+          const eventsOutsideRange = (track.events || [])
+            .filter((event: any) => {
+              const eventTick = event.tick || 0;
+              return eventTick < startTick || eventTick >= endTick;
+            });
+
+          // 置換用データから全トラックのイベントを取得（SMF→JSONで統合されている可能性があるため）
+          let replacementEvents: any[] = [];
+          
+          if (trackIndex === 0) {
+            // 統合されたトラックの場合、置換データの全非メタイベントを統合
+            for (const replacementTrack of (replacementJson.tracks || [])) {
+              const trackEvents = (replacementTrack.events || [])
+                .filter((event: any) => !event.type?.startsWith('meta.')) // メタイベント除外
+                .map((event: any) => ({
+                  ...event,
+                  tick: (event.tick || 0) + startTick, // 絶対tickに変換
+                  channel: event.channel !== undefined ? event.channel : replacementTrack.channel // トラックのチャンネルを継承
+                }));
+              replacementEvents.push(...trackEvents);
+            }
+          } else if (replacementJson.tracks?.[trackIndex]) {
+            // 対応するトラックがある場合はそのイベントを使用
+            replacementEvents = (replacementJson.tracks[trackIndex].events || [])
+              .map((event: any) => ({
+                ...event,
+                tick: (event.tick || 0) + startTick // 絶対tickに変換
+              }));
+          }
+
+          return {
+            ...track,
+            events: [...eventsOutsideRange, ...replacementEvents].sort((a: any, b: any) => (a.tick || 0) - (b.tick || 0))
+          };
+        })
+      };
+
+      // SMFファイルとして保存
+      const bin = encodeToSmfBinary(modifiedJson);
+      const data = Buffer.from(bin.buffer, bin.byteOffset, bin.byteLength);
+      const midiDir = resolveMidiDir();
+      await fs.mkdir(midiDir, { recursive: true });
+
+      // 出力ファイル名の決定
+      let finalName: string;
+      if (outputName) {
+        finalName = outputName.endsWith('.mid') ? outputName : `${outputName}.mid`;
+      } else {
+        const baseName = item.name.replace(/\.mid$/i, '');
+        finalName = `${baseName}_bars${startBar}-${endBar}.mid`;
+      }
+
+      const absOut = path.join(midiDir, finalName);
+      await fs.writeFile(absOut, data);
+      const base = resolveBaseDir();
+      const relPath = path.relative(base, absOut);
+      const bytes = data.byteLength;
+
+      // 新しいファイルとしてmanifestに登録
+      const newFileId = `replace_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      const newItem: ItemRec = {
+        id: newFileId,
+        name: finalName,
+        path: relPath,
+        bytes,
+        createdAt: new Date().toISOString()
+      };
+
+      await appendItem(newItem as any);
+      inMemoryIndex.set(newFileId, newItem);
+
+      return wrap({
+        ok: true,
+        originalFileId: fileId,
+        newFileId,
+        name: finalName,
+        path: relPath,
+        bytes,
+        startBar: Number(startBar),
+        endBar: Number(endBar),
+        startTick,
+        endTick,
+        replacedEventCount: replacementJson.tracks?.reduce((sum: number, track: any) => sum + (track.events?.length || 0), 0) || 0,
+        totalEventCount: modifiedJson.tracks.reduce((sum: number, track: any) => sum + (track.events?.length || 0), 0)
+      }) as any;
+    }
+
     // play_smf: parse SMF and schedule playback (or dryRun for analysis only)
     if (name === "play_smf") {
       const fileId: string | undefined = args?.fileId;
-      const startMs: number | undefined = Number.isFinite(Number(args?.startMs)) ? Number(args?.startMs) : undefined;
-      const stopMs: number | undefined = Number.isFinite(Number(args?.stopMs)) ? Number(args?.stopMs) : undefined;
+  const startMs: number | undefined = Number.isFinite(Number(args?.startMs)) ? Number(args?.startMs) : undefined;
+  const stopMs: number | undefined = Number.isFinite(Number(args?.stopMs)) ? Number(args?.stopMs) : undefined;
+  // 新規: 小節範囲指定（ms指定が存在する場合は優先される）
+  const startBar: number | undefined = Number.isFinite(Number(args?.startBar)) ? Math.max(1, Math.floor(Number(args?.startBar))) : undefined;
+  const endBar: number | undefined = Number.isFinite(Number(args?.endBar)) ? Math.max(1, Math.floor(Number(args?.endBar))) : undefined;
   const dryRun: boolean = !!args?.dryRun;
   const schedulerLookaheadMs: number | undefined = Number.isFinite(Number(args?.schedulerLookaheadMs)) ? Math.max(10, Math.min(1000, Number(args?.schedulerLookaheadMs))) : undefined;
   const schedulerTickMs: number | undefined = Number.isFinite(Number(args?.schedulerTickMs)) ? Math.max(5, Math.min(200, Number(args?.schedulerTickMs))) : undefined;
       if (!fileId) throw new Error("'fileId' is required for play_smf");
+
+  // 小節範囲抽出モード識別用（precise/simple）
+  let extractionMode: 'simple' | 'precise' = 'simple';
+  // debug: 精密抽出時の中間JSONを返すための変数（環境変数 MCP_MIDI_PLAY_SMF_DEBUG_JSON がtruthyな場合のみ応答に含める）
+  let debugExtracted: any | undefined;
 
       let item: ItemRec | undefined = inMemoryIndex.get(fileId);
       if (!item) item = (await getItemById(fileId)) as ItemRec | undefined;
@@ -1652,6 +2032,155 @@ async function main() {
         const Midi = mod?.Midi || mod?.default?.Midi;
         if (!Midi) throw new Error('Midi class not found in @tonejs/midi');
         const midi = new Midi(buf);
+        // --- 精密小節抽出モード: ms指定なし かつ bar指定あり かつ env が simple でない場合 ---
+        const hasTempoChange = Array.isArray((midi as any).header?.tempos) && (midi as any).header.tempos.length > 1;
+        const hasTimeSigChange = Array.isArray((midi as any).header?.timeSignatures) && (midi as any).header.timeSignatures.length > 1;
+        // 条件拡張: startBar > 1 の抽出でも精密モードを使用 (R11 tempo crossing RED テストを GREEN 化する初期段階)
+        // 将来: 実際に途中テンポ/拍子変化が無いケースでは simple に戻す最適化を再検討可
+        const wantPreciseBar = (startBar !== undefined || endBar !== undefined)
+          && startMs === undefined && stopMs === undefined
+          && (process.env.MCP_MIDI_PLAY_SMF_BAR_MODE !== 'simple')
+          && (hasTempoChange || hasTimeSigChange || (startBar !== undefined && startBar > 1));
+  // 上位に宣言済み extractionMode を使用
+        if (wantPreciseBar) {
+          try {
+            // (1) 既存の smf_to_json ロジックを再利用するため一旦 json 化
+            const baseJson = await (async ()=>{
+              const mod = await import('./smfToJson.js');
+              const fn: any = (mod as any).decodeSmfToJson || (mod as any).default?.decodeSmfToJson || (mod as any).default || (mod as any).smfToJson;
+              if (typeof fn !== 'function') throw new Error('decodeSmfToJson function not found');
+              const arrBuf = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+              return fn(arrBuf);
+            })();
+            const sBar = startBar ?? 1;
+            const eBar = endBar ?? sBar;
+            // (2) 既存 extract_bars 相当ロジック簡易コピー（将来共通化）
+            const ppq = baseJson.ppq || 480;
+            // ヘルパ: bar→tick (拍子変化対応: 最後に現れた定義を使用)
+            const timeSigs = baseJson.tracks.flatMap((t:any)=> (t.events||[]).filter((e:any)=> e.type==='meta.timeSignature')).sort((a:any,b:any)=> a.tick-b.tick);
+            const tempoEvts = baseJson.tracks.flatMap((t:any)=> (t.events||[]).filter((e:any)=> e.type==='meta.tempo')).sort((a:any,b:any)=> a.tick-b.tick);
+            const getEffectiveTS = (tick:number)=>{
+              let cur = { numerator:4, denominator:4 };
+              for (const ts of timeSigs){ if (ts.tick<=tick) cur={ numerator:ts.numerator, denominator:ts.denominator }; else break; }
+              return cur;
+            };
+            // 近似: barToTick を逐次生成
+            const barToTickCache = new Map<number, number>();
+            function barToTick(bar:number): number {
+              if (barToTickCache.has(bar)) return barToTickCache.get(bar)!;
+              if (bar===1){ barToTickCache.set(1,0); return 0; }
+              // 前のバー末尾tick + 1バー長
+              const prevTick = barToTick(bar-1);
+              const ts = getEffectiveTS(prevTick);
+              const ticksPerBar = ppq * ts.numerator * (4/ts.denominator);
+              const val = prevTick + ticksPerBar;
+              barToTickCache.set(bar, val);
+              return val;
+            }
+            const startTick = barToTick(sBar);
+            const endTickExclusive = barToTick(eBar+1);
+            // (3) 範囲抽出 & 正規化
+            const newTracks:any[] = [];
+            for (const tr of baseJson.tracks){
+              const evs = [] as any[];
+              const activeNotes = new Map<string, any>();
+              for (const ev of (tr.events||[])){
+                const tk = ev.tick ?? 0;
+                if (tk < startTick || tk >= endTickExclusive) {
+                  // ノート跨ぎ: start < startTick < end
+                  if (ev.type==='note' && ev.tick < startTick && (ev.tick + ev.duration) > startTick){
+                    // 跨ぎノートを 0tick から開始し残余のみ
+                    const remain = (ev.tick + ev.duration) - startTick;
+                    evs.push({ ...ev, tick:0, duration: remain });
+                  }
+                  continue;
+                }
+                // 範囲内
+                if (typeof tk === 'number') {
+                  const shifted = { ...ev, tick: tk - startTick };
+                  if (shifted.type==='note') shifted.duration = Math.max(1, Math.min(shifted.duration, endTickExclusive - tk));
+                  evs.push(shifted);
+                }
+              }
+              if (evs.length) newTracks.push({ ...tr, events: evs });
+            }
+            // track0 メタ再シード: 最新 tempo/timeSig/keySig を 0tick に配置
+            const seedMeta:any[] = [];
+            const latest = (list:any[], pred:(e:any)=>boolean)=>{
+              let sel; for(const e of list){ if (e.tick<=startTick && pred(e)) sel=e; else if (e.tick>startTick) break; } return sel;
+            };
+            const latestTS = latest(timeSigs, ()=>true); if (latestTS) seedMeta.push({ type:'meta.timeSignature', tick:0, numerator:latestTS.numerator, denominator:latestTS.denominator });
+            const keySigs = baseJson.tracks.flatMap((t:any)=> (t.events||[]).filter((e:any)=> e.type==='meta.keySignature')).sort((a:any,b:any)=> a.tick-b.tick);
+            const latestKS = latest(keySigs, ()=>true); if (latestKS) seedMeta.push({ type:'meta.keySignature', tick:0, sf:latestKS.sf, mi:latestKS.mi });
+            const latestTempo = latest(tempoEvts, ()=>true); if (latestTempo) seedMeta.push({ type:'meta.tempo', tick:0, usPerQuarter: latestTempo.usPerQuarter });
+            // 既存 track0 を先頭に（なければ生成）
+            const track0 = { events: seedMeta };
+            const extracted = { ppq, tracks: [track0, ...newTracks] };
+            // --- 追加: CC / PitchBend 状態シード (段階: 任意CC + 将来pitchBend) ---
+            try {
+              const ccEventsAll = baseJson.tracks.flatMap((t:any)=> (t.events||[]).filter((e:any)=> e.type==='cc' && typeof e.controller==='number'));
+              // controller × channel の最新を抽出 (tick <= startTick)
+              const latestPerKey = new Map<string, any>();
+              for (const ev of ccEventsAll.sort((a:any,b:any)=> (a.tick|0)-(b.tick|0))) {
+                if ((ev.tick|0) <= startTick) {
+                  const ch = Number.isFinite(Number(ev.channel)) ? (ev.channel|0) : 0;
+                  const key = `${ch}:${ev.controller}`;
+                  latestPerKey.set(key, ev);
+                } else {
+                  break;
+                }
+              }
+              for (const [key, ev] of latestPerKey.entries()) {
+                if (typeof ev.value === 'number') {
+                  track0.events.push({ type:'cc', tick:0, controller: ev.controller, value: ev.value, channel: ev.channel });
+                }
+              }
+              // pitchBend シード: チャンネル毎に startTick 以前の最新値を 0tick に再注入
+              try {
+                const pbEventsAll = baseJson.tracks.flatMap((t:any)=> (t.events||[]).filter((e:any)=> e.type==='pitchBend'));
+                if (process.env.MCP_MIDI_PLAY_SMF_DEBUG_JSON) {
+                  // デバッグ: startTick 以前/以後の pitchBend 一覧
+                  const dbgBefore = pbEventsAll.filter((e:any)=> (e.tick|0) <= startTick).map((e:any)=>({tick:e.tick,value:e.value,channel:e.channel}));
+                  const dbgAfter = pbEventsAll.filter((e:any)=> (e.tick|0) > startTick).map((e:any)=>({tick:e.tick,value:e.value,channel:e.channel}));
+                  (track0 as any).events.push({ type:'meta.marker', tick:0, text:`DBG_PB<= ${JSON.stringify(dbgBefore).slice(0,200)}` });
+                  (track0 as any).events.push({ type:'meta.marker', tick:0, text:`DBG_PB> ${JSON.stringify(dbgAfter).slice(0,200)}` });
+                }
+                const latestPBPerCh = new Map<number, any>();
+                for (const ev of pbEventsAll.sort((a:any,b:any)=> (a.tick|0)-(b.tick|0))) {
+                  if ((ev.tick|0) <= startTick) {
+                    const ch = Number.isFinite(Number(ev.channel)) ? (ev.channel|0) : 0;
+                    latestPBPerCh.set(ch, ev);
+                  } else {
+                    break;
+                  }
+                }
+                for (const [ch, ev] of latestPBPerCh.entries()) {
+                  if (typeof ev.value === 'number') {
+                    track0.events.push({ type:'pitchBend', tick:0, value: ev.value, channel: ch });
+                  }
+                }
+              } catch {/* ignore pitchBend seed errors */}
+            } catch {/* 非致命 */}
+            // (4) JSON→SMF バッファ化（メモリのみ）
+            const mod2 = await import('./jsonToSmf.js');
+            const encFn: any = (mod2 as any).encodeToSmfBinary || (mod2 as any).default?.encodeToSmfBinary || (mod2 as any).default;
+            if (typeof encFn !== 'function') throw new Error('encodeToSmfBinary function not found');
+            const smfBin = encFn(extracted as any);
+            // 再度 Midi に読み込み直し
+            const midi2 = new Midi(Buffer.from(smfBin));
+            // 元 midi を置き換え (後続処理は同じ)
+            (midi as any)._tracks = midi2.tracks; // 内部差し替え（簡易）
+            extractionMode = 'precise';
+            // 精密抽出成功: simplified フラグと区別し 'bar-range applied' 文字列を含めない
+            warnings.push(`bar-range precise extraction (startBar=${sBar}, endBar=${eBar})`);
+            if (process.env.MCP_MIDI_PLAY_SMF_DEBUG_JSON) {
+              debugExtracted = extracted; // 応答へ含める
+            }
+            // 以降は通常ノート展開へ
+          } catch (ex:any) {
+            warnings.push(`bar-range precise extraction failed fallback simple: ${ex?.message||ex}`);
+          }
+        }
         // notes をmsに展開（tempo変化は@tonejs/midiがtime/secondsに反映済み）
         for (const tr of midi.tracks) {
           const ch = Number.isFinite(Number(tr?.channel)) ? Number(tr.channel) : 0;
@@ -1668,7 +2197,7 @@ async function main() {
         }
         // ソート: 時刻昇順、同時刻は NoteOff を先に
         events.sort((a,b)=> a.tMs - b.tMs || (a.kind==='off'? -1: 1));
-        // 範囲クリップ
+        // 範囲クリップ: 1) ms指定 2) 小節指定 (simple モードのみ)
         if (startMs !== undefined || stopMs !== undefined) {
           const s = startMs ?? 0;
           const e = stopMs ?? Number.POSITIVE_INFINITY;
@@ -1689,6 +2218,34 @@ async function main() {
             events.push(...synthOff);
             events.sort((a,b)=> a.tMs - b.tMs || (a.kind==='off'? -1: 1));
           }
+  } else if ((startBar !== undefined || endBar !== undefined) && extractionMode==='simple') {
+          // simple モード（互換フォールバック）
+          let bpm = 120;
+          if (midi.header?.tempos?.length) bpm = midi.header.tempos[0].bpm || bpm;
+          let numerator = 4, denominator = 4;
+          if (midi.header?.timeSignatures?.length) {
+            const ts = midi.header.timeSignatures[0].timeSignature || [4,4];
+            numerator = ts[0] || 4; denominator = ts[1] || 4;
+          }
+          const quarterMs = 60000 / bpm;
+          const barMs = quarterMs * numerator * (4 / denominator);
+          const sBar = startBar ?? 1;
+          const eBar = endBar ?? Number.MAX_SAFE_INTEGER;
+          const sMs = (sBar - 1) * barMs;
+          const eMs = eBar * barMs;
+          events = events.filter(ev => ev.tMs >= sMs && ev.tMs <= eMs);
+          const lastBoundary = Number.isFinite(eMs) ? eMs : (events.length ? events[events.length-1]!.tMs : sMs);
+          const onMap = new Map<string, Ev>();
+            const synthOff: Ev[] = [];
+            for (const ev of events) {
+              const key = `${ev.ch}:${ev.n}`;
+              if (ev.kind === 'on') onMap.set(key, ev); else onMap.delete(key);
+            }
+            for (const [key, onEv] of onMap) {
+              synthOff.push({ tMs: Math.max(onEv.tMs + 5, lastBoundary), kind: 'off', ch: onEv.ch, n: onEv.n, v: 0 });
+            }
+            if (synthOff.length) { events.push(...synthOff); events.sort((a,b)=> a.tMs - b.tMs || (a.kind==='off'? -1: 1)); }
+          warnings.push(`bar-range applied (startBar=${startBar ?? ''}, endBar=${endBar ?? ''}) tempo/timeSig simplified`);
         }
         scheduledEvents = events.length;
         if (events.length > 0) {
@@ -1702,9 +2259,10 @@ async function main() {
       const registry: Map<string, any> = (globalThis as any).__playbacks = (globalThis as any).__playbacks || new Map();
 
       // dryRun: 解析のみで即返す
-      if (dryRun || events.length === 0) {
-        registry.set(playbackId, { fileId, startedAt: Date.now(), scheduledEvents, totalDurationMs, dryRun: true });
-        return wrap({ ok: true, playbackId, scheduledEvents, totalDurationMs, warnings: warnings.length ? warnings : undefined }) as any;
+    if (dryRun || events.length === 0) {
+  registry.set(playbackId, { fileId, startedAt: Date.now(), scheduledEvents, totalDurationMs, dryRun: true });
+  // extractionMode を返却（precise 成功時は simplified warning を含まない想定）
+  return wrap({ ok: true, playbackId, scheduledEvents, totalDurationMs, extractionMode, ...(debugExtracted ? { debug: { extracted: debugExtracted } } : {}), warnings: warnings.length ? warnings : undefined }) as any;
       }
 
       // 実再生: ルックアヘッドスケジューラ
@@ -1835,7 +2393,7 @@ async function main() {
       state.intervalId = intervalId;
 
       registry.set(playbackId, state);
-    return wrap({ ok: true, playbackId, scheduledEvents, totalDurationMs, warnings: warnings.length ? warnings : undefined }) as any;
+  return wrap({ ok: true, playbackId, scheduledEvents, totalDurationMs, warnings: warnings.length ? warnings : undefined }) as any;
     }
 
     // get_midi: retrieve file metadata and optionally base64 content

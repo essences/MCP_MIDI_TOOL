@@ -1,6 +1,6 @@
 # プロダクトバックログ - MCP MIDI TOOL
 
-更新日: 2025-08-27（構造化エラー・autoCcPresets・デバイス入力キャプチャ・継続MIDI記録機能追加）
+更新日: 2025-08-29（R11 精密抽出: pitchBend/CC64/任意CCシード GREEN／README 精密抽出章追加／package.json 整形・CI TODO 準備）
 
 凡例: [ ] 未着手 / [~] 進行中 / [x] 完了 / [!] ブロック
 
@@ -15,9 +15,25 @@
 8. [x] R7: ツール `insert_cc`（任意CCの2値レンジ挿入｜README＋E2E）
 9. [x] **R9: 継続MIDI記録機能**（Phase1-4完了: 基本→タイムアウト→手動終了→高度機能・観測性）
 10. [x] R3: 構造化エラー分類・レスポンス統一（VALIDATION_ERROR/NOT_FOUND等）
-11. [ ] R4: CIで各OSのビルドとdryRunスモーク（macOS/Windows/Linux）
-12. [ ] R4: Windows/Linux のデバイス列挙・出力の実機検証
-13. [ ] R2: transform_midi（最小: transpose → 次: quantize/tempo/humanize）
+11. [x] R10: 小節範囲部分編集機能（extract_bars/replace_bars｜小節指定でJSON抽出・置換｜作曲編集ワークフロー対応）
+12. [ ] R4: CIで各OSのビルドとdryRunスモーク（macOS/Windows/Linux）(README精密抽出章後に GitHub Actions workflow 追加予定)
+13. [ ] R4: Windows/Linux のデバイス列挙・出力の実機検証
+14. [ ] R2: transform_midi（最小: transpose → 次: quantize/tempo/humanize）
+15. [ ] R11: 精密小節範囲再生（play_smf bar-range extraction モード）
+  - [ ] 仕様: startBar/endBar 指定時は ms 概算ではなく JSON 抽出→再エンコード→原点シフトなしで再生
+  - [ ] 実装: 内部 helper (extractBarsForPlayback) で tempo/timeSig/keySig/CC 状態を 0tick に再シード
+  - [ ] 実装: ノート跨ぎ補正（範囲前継続ノートの NoteOn 合成 / 範囲後延長ノートの NoteOff 合成）
+  - [x] 実装: pitchBend の直前最新値を 0tick に再シード（正規化値 -1..1 / 14bit 両対応デコード修正含む）
+  - [x] テスト(RED→GREEN): pitchBend 状態シード `play_smf_bar_range_precise_pitchbend_seed.test.ts` GREEN（2048 シード確認）
+  - [x] 実装(一部): CC64 の直前値を 0tick に再シード（精密小節抽出時）+ RED→GREEN テスト `play_smf_bar_range_precise_cc_seed.test.ts`
+  - [x] 実装(拡張): 任意 CC (全controller) の直前値を 0tick にシード（`play_smf_bar_range_precise_cc_generic_seed.test.ts` GREEN）
+  - [x] 応答: warnings から simplified を除去し extractionMode:"precise" を追加（precise成功時）
+  - [x] TDD: 1) RED: simplified warning が無いことを期待→失敗 2) GREEN: 実装反映（本コミットでGREEN） 3) リファクタ(未)
+  - [ ] テスト: (a) 2テンポ変化 (bpm120→240) の bar2 抽出 (b) 拍子変更 4/4→3/4 跨ぎ (c) sustain ペダル跨ぎ (OFF含む) (d) 跨ぎノート (e) pitchBend シード
+  - [x] テスト(一部): sustain ペダル状態シード (CC64) bar2 抽出 RED→GREEN
+  - [x] テスト(追加): 任意 CC (CC11) 状態シード RED→GREEN
+  - [x] README更新: startBar/endBar の挙動を「抽出モード（精密）」へ更新し制約/内部手順を記載
+  - [ ] 移行: 環境変数 MCP_MIDI_PLAY_SMF_BAR_MODE=simple|precise で旧挙動へフォールバック可能に
 
 ## R1（MVP）
 - [x] MCPツール仕様を確定しドキュメント化（docs/specs/R1_requirements.md）
@@ -190,6 +206,15 @@
    - Phase3: stop_continuous_recording・自動SMF保存・ファイル命名・重複回避・overwrite対応
    - Phase4: list_continuous_recordings・マルチセッション（最大3）・メモリ管理（100K/10MB制限）・24時間自動削除・channelFilter/eventTypeFilter
    - テスト完了: 基本3件・タイムアウト4件・手動終了3件・自動保存3件・Phase4で4件・全72テスト合格
+ - **R10 小節範囲部分編集機能完了**: extract_bars・replace_bars実装（2025-08-28）
+   - extract_bars: 指定小節範囲をJSON MIDI形式で抽出（相対tick変換・タイムシグネチャ対応）
+   - replace_bars: 指定小節範囲をJSONデータで置換（SMF統合トラック構造対応・置換ロジック修正）
+   - 小節計算ロジック: barToTick変換・extractTimeSignatureFromJson実装
+   - テスト完了: 基本抽出・複数小節抽出・置換・エラーハンドリングの4件全合格
+   - README更新: 小節範囲編集セクション追加・ツールリスト更新・使用例ドキュメント化
+ - **R11 精密小節範囲再生 進捗 (2025-08-29)**: pitchBend / CC64 / 任意CC (全controller) 直前値シード実装＆テストGREEN。warnings から simplified 削除し extractionMode:"precise" 応答実装。残: (a) 複数テンポ変化/拍子変更/ノート跨ぎ/ペダルOFF跨ぎ REDテスト追加 (b) 跨ぎノート合成実装 (c) README精密抽出章 (d) fallback環境変数。
+ - テストランナー: `.vscode/tasks.json` の Vitest コマンドから非対応 `--threads=false` オプションを除去（Vitest v2.1.9 互換）。
+ - **R9 テスト安定化 (2025-08-29)**: 連続記録系 (basic/timeout/auto_save) テストを `describe.sequential` 化＋型注釈でフレーク (timeout) 解消。個別10テスト 24s内安定PASS。
 
 ### 次の改善（テスト駆動）
 - **R4**: CIで各OSビルド・Windows/Linux実機検証・クロスプラットフォーム対応強化

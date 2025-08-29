@@ -10,6 +10,9 @@ describe('Continuous Recording Manual Stop', () => {
     serverProcess = spawn('node', [path.resolve('./dist/index.js')], {
       stdio: ['pipe', 'pipe', 'pipe']
     });
+    if (serverProcess.stderr) {
+      serverProcess.stderr.on('data', d => console.error('[server:stderr]', d.toString()));
+    }
     
     await new Promise((resolve) => {
       const timeout = setTimeout(resolve, 2000);
@@ -98,7 +101,8 @@ describe('Continuous Recording Manual Stop', () => {
       ? JSON.parse(startResponse.result.content[0].text)
       : startResponse.result;
     
-    expect(startResult.ok).toBe(true);
+  if (!startResult.ok) console.error('[diagnostic] manual stop start failed:', startResult);
+  expect(startResult.ok).toBe(true);
     const recordingId = startResult.recordingId;
 
     // 少し待機（記録中状態にする必要はないが、テストの確実性のため）
@@ -255,6 +259,9 @@ describe('Continuous Recording Manual Stop', () => {
       ? JSON.parse(stopResponse2.result.content[0].text)
       : stopResponse2.result;
 
+    if (stopResult2.name !== 'overwrite-test.mid') {
+      console.error('[diagnostic] overwrite file name mismatch:', stopResult2);
+    }
     expect(stopResult2.name).toBe('overwrite-test.mid'); // 同じファイル名
   }, 12000);
 });

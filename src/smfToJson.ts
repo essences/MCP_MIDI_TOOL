@@ -118,8 +118,28 @@ export async function decodeSmfToJson(buf: Uint8Array | Buffer): Promise<JsonMid
     // Pitch Bend (if available)
     for (const pb of (tr.pitchBends || [])) {
       const tick = Math.max(0, Math.round(Number(pb.ticks) || 0));
-      const value14 = Math.max(0, Math.min(16383, Math.round(Number(pb.value) || 8192)));
-      const value = value14 - 8192;
+      const raw = Number(pb.value);
+      let value14: number;
+      if (Number.isFinite(raw)) {
+        // Tone.js の pitchBend は実装により以下2パターンが観測される想定:
+        //  (A) 0..16383 の 14bit 生値
+        //  (B) -1..+1 の正規化値（0 がセンター、+1 が最大正方向）
+        // 2048 (+1/4 range) が 0.25 などで与えられた場合、従来実装では round(0.25)=0 → -8192 へ潰れていた。
+        if (raw >= 0 && raw <= 16383 && Math.round(raw) === raw) {
+          value14 = raw; // (A) 生値
+        } else if (raw >= -1 && raw <= 1) {
+          // (B) 正規化: -1 → 0, 0 → 8192, +1 → 16383 （線形）
+          // 14bit は 0..16383 の 16384 離散値。端点含む線形マッピングで off-by-one を避けるため 16384 を乗算し 16383 に clamp。
+          value14 = Math.round(((raw + 1) / 2) * 16384);
+          if (value14 > 16383) value14 = 16383; // 上端補正
+        } else {
+          value14 = 8192; // 不明値はセンター
+        }
+      } else {
+        value14 = 8192;
+      }
+      value14 = Math.max(0, Math.min(16383, value14));
+      const value = value14 - 8192; // -8192 .. +8191
       const ev: any = { type: "pitchBend", tick, value };
       if (channel !== undefined) ev.channel = channel;
       events.push(ev);

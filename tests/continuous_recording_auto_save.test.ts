@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 
-describe('Continuous Recording Auto Save', () => {
+// NOTE: フレーク対策: 実時間依存 (idle/maxDuration) により並列時に遅延してタイムアウト閾値に接近するため sequential 化
+describe.sequential('Continuous Recording Auto Save', () => {
   let serverProcess: ChildProcess;
   let serverReady = false;
   
@@ -10,6 +11,9 @@ describe('Continuous Recording Auto Save', () => {
     serverProcess = spawn('node', [path.resolve('./dist/index.js')], {
       stdio: ['pipe', 'pipe', 'pipe']
     });
+    if (serverProcess.stderr) {
+      serverProcess.stderr.on('data', d => console.error('[server:stderr]', d.toString()));
+    }
     
     await new Promise((resolve) => {
       const timeout = setTimeout(resolve, 2000);
@@ -98,7 +102,8 @@ describe('Continuous Recording Auto Save', () => {
       ? JSON.parse(startResponse.result.content[0].text)
       : startResponse.result;
     
-    expect(startResult.ok).toBe(true);
+  if (!startResult.ok) console.error('[diagnostic] auto-save idle start failed:', startResult);
+  expect(startResult.ok).toBe(true);
     const recordingId = startResult.recordingId;
 
     // idle timeoutが発生するまで待機 + 自動保存処理時間
@@ -139,7 +144,8 @@ describe('Continuous Recording Auto Save', () => {
       ? JSON.parse(startResponse.result.content[0].text)
       : startResponse.result;
     
-    expect(startResult.ok).toBe(true);
+  if (!startResult.ok) console.error('[diagnostic] auto-save maxDuration start failed:', startResult);
+  expect(startResult.ok).toBe(true);
     const recordingId = startResult.recordingId;
 
     // max duration timeoutが発生するまで待機 + 自動保存処理時間  
@@ -189,7 +195,8 @@ describe('Continuous Recording Auto Save', () => {
       ? JSON.parse(stopResponse.result.content[0].text)
       : stopResponse.result;
 
-    expect(stopResult.ok).toBe(true);
+  if (!stopResult.ok) console.error('[diagnostic] default filename stop failed:', stopResult);
+  expect(stopResult.ok).toBe(true);
     
     // デフォルトファイル名形式: recording-YYYY-MM-DD-HHmmss.mid
     const expectedPrefix = `recording-${startedAt.getFullYear()}-${String(startedAt.getMonth() + 1).padStart(2, '0')}-${String(startedAt.getDate()).padStart(2, '0')}`;

@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 
-describe('Continuous Recording Basic', () => {
+// NOTE: フレーク対策: 他ファイルと並列実行時に setTimeout ベース計測が遅延し test timeout を超過する問題があったため
+// describe.sequential を使用して当該グループ内テストを逐次実行し、安定性を向上させる。
+describe.sequential('Continuous Recording Basic', () => {
   let serverProcess: ChildProcess;
   let serverReady = false;
   
@@ -11,6 +13,12 @@ describe('Continuous Recording Basic', () => {
     serverProcess = spawn('node', [path.resolve('./dist/index.js')], {
       stdio: ['pipe', 'pipe', 'pipe']
     });
+    // stderr収集（デバッグ）
+    if (serverProcess.stderr) {
+      serverProcess.stderr.on('data', d => {
+        console.error('[server:stderr]', d.toString());
+      });
+    }
     
     // サーバー起動待機
     await new Promise((resolve) => {
@@ -111,7 +119,7 @@ describe('Continuous Recording Basic', () => {
       }
     });
 
-    console.log('Start recording response:', JSON.stringify(startResponse, null, 2));
+  console.log('Start recording response (raw):', JSON.stringify(startResponse, null, 2));
     
     // レスポンス検証
     expect(startResponse.result).toBeDefined();
@@ -119,6 +127,9 @@ describe('Continuous Recording Basic', () => {
       ? JSON.parse(startResponse.result.content[0].text)
       : startResponse.result;
     
+    if (!result.ok) {
+      console.error('[diagnostic] start_continuous_recording failed raw result:', result);
+    }
     expect(result.ok).toBe(true);
     expect(result.recordingId).toBeDefined();
     expect(result.ppq).toBe(480);
@@ -138,7 +149,7 @@ describe('Continuous Recording Basic', () => {
       }
     });
 
-    console.log('Status response:', JSON.stringify(statusResponse, null, 2));
+  console.log('Status response (raw):', JSON.stringify(statusResponse, null, 2));
 
     const statusResult = statusResponse.result.content?.[0]?.text 
       ? JSON.parse(statusResponse.result.content[0].text)
@@ -200,6 +211,9 @@ describe('Continuous Recording Basic', () => {
       : startResponse1.result;
     
     // ppq は自動的に96に調整される
+    if (result1.ppq !== 96) {
+      console.error('[diagnostic] ppq auto-adjust failed. raw:', result1);
+    }
     expect(result1.ppq).toBe(96);
 
     // maxDurationMs範囲外テスト 
@@ -216,6 +230,9 @@ describe('Continuous Recording Basic', () => {
       : startResponse2.result;
     
     // maxDurationMs は自動的に1000に調整される
+    if (result2.maxDurationMs !== 1000) {
+      console.error('[diagnostic] maxDurationMs auto-adjust failed. raw:', result2);
+    }
     expect(result2.maxDurationMs).toBe(1000);
   });
 });
