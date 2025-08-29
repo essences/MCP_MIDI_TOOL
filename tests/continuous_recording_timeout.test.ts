@@ -1,92 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { spawn, ChildProcess } from 'child_process';
-import path from 'path';
+import { spawnMcpServer, McpTestServer } from './helpers/mcpServer';
 
 // NOTE: フレーク対策: 並列実行で idle/maxDuration の実時間計測が遅延し 8-10s の test timeout を超過したため
 // describe.sequential を使用しテスト間の並列負荷を避ける。
 describe.sequential('Continuous Recording Timeout', () => {
-  let serverProcess: ChildProcess;
-  let serverReady = false;
+  let server: McpTestServer;
   
-  beforeEach(async () => {
-    serverProcess = spawn('node', [path.resolve('./dist/index.js')], {
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
-    if (serverProcess.stderr) {
-      serverProcess.stderr.on('data', d => console.error('[server:stderr]', d.toString()));
-    }
-    
-    await new Promise((resolve) => {
-      const timeout = setTimeout(resolve, 2000);
-      if (serverProcess.stdout) {
-        serverProcess.stdout.on('data', () => {
-          serverReady = true;
-          clearTimeout(timeout);
-          resolve(undefined);
-        });
-      } else {
-        setTimeout(resolve, 2000);
-      }
-    });
-    
-    serverReady = true;
-  });
+  beforeEach(async () => { server = await spawnMcpServer(); });
 
-  afterEach(async () => {
-    if (serverProcess) {
-      serverProcess.kill();
-      await new Promise(resolve => {
-        serverProcess.on('exit', resolve);
-        setTimeout(resolve, 1000);
-      });
-    }
-  });
+  afterEach(async () => { await server.shutdown(); });
 
-  const sendMCPRequest = async (method: string, params: any = {}): Promise<any> => {
-    return new Promise((resolve, reject) => {
-      if (!serverProcess.stdin || !serverProcess.stdout) {
-        reject(new Error('Server not ready'));
-        return;
-      }
-
-      const requestId = Math.floor(Math.random() * 1000000);
-      const request = JSON.stringify({
-        jsonrpc: '2.0',
-        id: requestId,
-        method,
-        params
-      }) + '\n';
-
-      let responseData = '';
-      const onData = (chunk: Buffer) => {
-        responseData += chunk.toString();
-        try {
-          const lines = responseData.split('\n').filter(line => line.trim());
-          for (const line of lines) {
-            const response = JSON.parse(line);
-            if (response.id === requestId) {
-              serverProcess.stdout?.off('data', onData);
-              resolve(response);
-              return;
-            }
-          }
-        } catch {
-          // JSON解析失敗は続行
-        }
-      };
-
-      serverProcess.stdout.on('data', onData);
-      serverProcess.stdin.write(request);
-
-      setTimeout(() => {
-        serverProcess.stdout?.off('data', onData);
-        reject(new Error('Request timeout'));
-      }, 15000); // タイムアウトテスト用に延長
-    });
-  };
+  const sendMCPRequest = (method: string, params: any = {}, timeout = 15000) => server.send(method, params, timeout);
 
   it('idleタイムアウト: 最初の入力がない場合', async () => {
-    if (!serverReady) return;
+  if (!server.ready) return;
 
     // 短いidleTimeoutで記録開始
     const startResponse = await sendMCPRequest('tools/call', {
@@ -141,7 +68,7 @@ describe.sequential('Continuous Recording Timeout', () => {
   }, 10000); // 10秒タイムアウト
 
   it('maxDurationタイムアウト: 記録全体の最大時間超過', async () => {
-    if (!serverReady) return;
+  if (!server.ready) return;
 
     // 短いmaxDurationで記録開始
     const startResponse = await sendMCPRequest('tools/call', {
@@ -195,7 +122,7 @@ describe.sequential('Continuous Recording Timeout', () => {
   }, 10000);
 
   it('タイマークリーンアップ確認: タイムアウト後に状態が安定', async () => {
-    if (!serverReady) return;
+  if (!server.ready) return;
 
     // 非常に短いidleTimeoutで記録開始
     const startResponse = await sendMCPRequest('tools/call', {
@@ -240,7 +167,7 @@ describe.sequential('Continuous Recording Timeout', () => {
   }, 8000);
 
   it('timeUntilTimeout計算精度確認', async () => {
-    if (!serverReady) return;
+  if (!server.ready) return;
 
     const startResponse = await sendMCPRequest('tools/call', {
       name: 'start_continuous_recording',
