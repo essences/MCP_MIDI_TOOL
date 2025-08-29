@@ -25,12 +25,45 @@ describe('trigger_notes tool', () => {
     const child = spawnServer();
     sendLine(child, { jsonrpc:'2.0', id:1, method:'initialize', params:{ protocolVersion:'2025-06-18', capabilities:{}, clientInfo:{ name:'vitest', version:'0' } } });
     await readLine(child);
-    sendLine(child, { jsonrpc:'2.0', id:2, method:'tools/call', params:{ name:'trigger_notes', arguments:{ notes:[60,64,67], transpose:12, dryRun:true } } });
+    sendLine(child, { jsonrpc:'2.0', id:2, method:'tools/call', params:{ name:'trigger_notes', arguments:{ notes:[60,64,67], transpose:12, channel:5, dryRun:true } } });
     const res = await readLine(child);
     expect(res.error).toBeUndefined();
     const body = JSON.parse(res.result.content[0].text);
     expect(body.ok).toBe(true);
     expect(body.scheduledNotes).toBe(3);
+    expect(body.channel).toBe(5); // 外部
+    expect(body.internalChannel).toBe(4); // 内部
+    child.kill();
+  }, 10000);
+});
+
+describe('trigger_notes channel mapping', () => {
+  it('maps external channel 10 -> internal 9', async () => {
+    const child = spawnServer();
+    sendLine(child, { jsonrpc:'2.0', id:1, method:'initialize', params:{ protocolVersion:'2025-06-18', capabilities:{}, clientInfo:{ name:'vitest', version:'0' } } });
+    await readLine(child);
+    sendLine(child, { jsonrpc:'2.0', id:2, method:'tools/call', params:{ name:'trigger_notes', arguments:{ notes:['C4'], channel:10, dryRun:true } } });
+    const res = await readLine(child);
+    expect(res.error).toBeUndefined();
+    const body = JSON.parse(res.result.content[0].text);
+    expect(body.ok).toBe(true);
+    expect(body.channel).toBe(10);
+    expect(body.internalChannel).toBe(9);
+    child.kill();
+  }, 10000);
+
+  it('legacy internal 0 still works with warning and reports external 1', async () => {
+    const child = spawnServer();
+    sendLine(child, { jsonrpc:'2.0', id:1, method:'initialize', params:{ protocolVersion:'2025-06-18', capabilities:{}, clientInfo:{ name:'vitest', version:'0' } } });
+    await readLine(child);
+    sendLine(child, { jsonrpc:'2.0', id:2, method:'tools/call', params:{ name:'trigger_notes', arguments:{ notes:['C4'], channel:0, dryRun:true } } });
+    const res = await readLine(child);
+    expect(res.error).toBeUndefined();
+    const body = JSON.parse(res.result.content[0].text);
+    expect(body.ok).toBe(true);
+    expect(body.channel).toBe(1);
+    expect(body.internalChannel).toBe(0);
+    expect(Array.isArray(body.warnings) ? body.warnings.join('\n') : '').toMatch(/legacy internal/);
     child.kill();
   }, 10000);
 });

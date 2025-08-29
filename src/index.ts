@@ -215,7 +215,29 @@ async function main() {
     if (name === "trigger_notes") {
       const rawNotes = args?.notes;
       if (!Array.isArray(rawNotes) || rawNotes.length === 0) throw new Error("'notes' must be a non-empty array");
-      const channel = Math.max(0, Math.min(15, Number(args?.channel ?? 0) | 0));
+      const rawChannelInput = args?.channel;
+      let channel: number; // 内部0-15
+      let resolvedChannelExternal: number; // 外部1-16
+      const warnings: string[] = [];
+      if (rawChannelInput === undefined) {
+        channel = 0;
+        resolvedChannelExternal = 1;
+      } else {
+        const num = Number(rawChannelInput);
+        if (!Number.isFinite(num)) throw new Error("channel must be a number (1-16)");
+        if (num >= 1 && num <= 16) {
+          // 正常な外部表記
+            resolvedChannelExternal = num | 0;
+            channel = (num - 1) | 0;
+        } else if (num >= 0 && num <= 15) {
+          // 旧実装互換: 内部値が直接渡されたケース
+          channel = num | 0;
+          resolvedChannelExternal = (num + 1) | 0;
+          warnings.push(`channel value ${num} interpreted as legacy internal (0-15). Use 1-16 external next time -> external ${resolvedChannelExternal}.`);
+        } else {
+          throw new Error("channel out of range (expected 1-16)");
+        }
+      }
       const velocity = Math.max(1, Math.min(127, Number(args?.velocity ?? 100) | 0));
       const durationMs = Math.max(20, Math.min(10000, Number(args?.durationMs ?? 500) | 0));
       const transpose = Number.isFinite(Number(args?.transpose)) ? (Number(args?.transpose) | 0) : 0;
@@ -235,13 +257,13 @@ async function main() {
         }
       }
 
-      const warnings: string[] = [];
+  // warnings は上部で定義・利用
       const playbackId = randomUUID();
       const registry: Map<string, any> = (globalThis as any).__playbacks = (globalThis as any).__playbacks || new Map();
 
       if (dryRun) {
         registry.set(playbackId, { type: 'oneshot', startedAt: Date.now(), scheduledEvents: notes.length*2, totalDurationMs: durationMs, cursor: notes.length*2, lastSentIndex: notes.length*2 - 1, lookahead: 0, tickInterval: 0, portName: undefined, done: true });
-        return wrap({ ok: true, playbackId, scheduledNotes: notes.length, durationMs, warnings: warnings.length ? warnings : undefined });
+        return wrap({ ok: true, playbackId, scheduledNotes: notes.length, durationMs, channel: resolvedChannelExternal, internalChannel: channel, warnings: warnings.length ? warnings : undefined });
       }
 
       // 実送出
@@ -311,7 +333,7 @@ async function main() {
         warnings.push(`trigger-warning: ${e?.message || String(e)}`);
       }
 
-      return wrap({ ok: true, playbackId, scheduledNotes: notes.length, durationMs, portName: portNameResolved, warnings: warnings.length ? warnings : undefined }) as any;
+  return wrap({ ok: true, playbackId, scheduledNotes: notes.length, durationMs, portName: portNameResolved, channel: resolvedChannelExternal, internalChannel: channel, warnings: warnings.length ? warnings : undefined }) as any;
     }
 
     // store_midi: save base64 to data/midi and update manifest
