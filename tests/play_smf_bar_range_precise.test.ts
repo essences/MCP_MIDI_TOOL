@@ -7,7 +7,7 @@ function send(child:any,obj:any){ child.stdin.write(JSON.stringify(obj)+'\n'); }
 async function recv(child:any){ const [buf]=await once(child.stdout,'data') as [Buffer]; return JSON.parse(buf.toString('utf8').split(/\r?\n/)[0]); }
 
 // JSON Score (score_dsl_v1 equivalent object) 2 bars whole notes, tempo change at bar2.
-const SCORE_OBJ = { ppq:480, meta:{ timeSignature:{numerator:4,denominator:4}, keySignature:{root:'C',mode:'major'}, tempo:{ changes:[ { bar:1, beat:1, bpm:120 }, { bar:2, beat:1, bpm:240 } ] } }, tracks:[ { name:'piano', channel:0, program:0, events:[ { type:'note', start:{bar:1,beat:1}, duration:{ value:'1' }, pitch:60, velocity:90 }, { type:'note', start:{bar:2,beat:1}, duration:{ value:'1' }, pitch:62, velocity:90 } ] } ] };
+const SCORE_OBJ = { ppq:480, meta:{ timeSignature:{numerator:4,denominator:4}, keySignature:{root:'C',mode:'major'}, tempo:{ changes:[ { bar:1, beat:1, bpm:120 }, { bar:2, beat:1, bpm:240 } ] } }, tracks:[ { name:'piano', channel:1, program:0, events:[ { type:'note', start:{bar:1,beat:1}, duration:{ value:'1' }, pitch:60, velocity:90 }, { type:'note', start:{bar:2,beat:1}, duration:{ value:'1' }, pitch:62, velocity:90 } ] } ] };
 
 /* RED TEST: いまは簡易ms換算で warnings に "bar-range applied" が含まれる想定。 精密化後は除去され extractionMode:"precise" が追加される。 */
 describe('play_smf precise bar extraction (RED)', () => {

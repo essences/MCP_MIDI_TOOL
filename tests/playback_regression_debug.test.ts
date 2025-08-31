@@ -44,7 +44,7 @@ describe("Playback Regression Debug", () => {
         { events: [ { type: "meta.tempo", tick: 0, usPerQuarter: 500000 } ] }, // 120 BPM
         {
           name: "Debug Sequence",
-          channel: 0,
+          channel: 1,
           events: [
             { type: "program", tick: 0, program: 0 }, // Piano
             // 非常にゆっくりとしたシーケンス（各音1秒間隔）

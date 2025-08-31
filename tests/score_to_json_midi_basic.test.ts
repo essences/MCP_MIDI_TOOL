@@ -14,7 +14,7 @@ describe("Score DSL → JSON MIDI v1", () => {
       tracks: [
         {
           name: "Lead",
-          channel: 0,
+          channel: 1, // 外部表記1-16
           program: 0,
           events: [
             { type: "note", note: "C4", start: { bar:1, beat:1 }, duration: { value: "1/4" }, articulation: "staccato", velocity: 100 },

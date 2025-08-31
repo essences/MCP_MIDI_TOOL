@@ -29,7 +29,7 @@ const JSON_MIDI = {
   { type: 'meta.tempo', tick: 0, usPerQuarter: 500000 }, // 120 bpm bar1
   { type: 'meta.tempo', tick: 1920, usPerQuarter: 400000 }, // 150 bpm bar2 (tempo change to enable precise mode gating)
     ]},
-    { channel:0, program:0, events: [
+  { channel:1, program:0, events: [
       { type: 'cc', tick: 0, controller: 64, value: 127 }, // sustain ON before extracted bar
       // bar1: whole note (ignored in extraction range) 0..1920 ticks
       { type: 'note', tick: 0, duration: 1920, pitch: 60, velocity: 100 },

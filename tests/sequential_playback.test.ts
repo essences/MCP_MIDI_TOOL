@@ -44,7 +44,7 @@ describe("Sequential MIDI Playback Test", () => {
         { events: [ { type: "meta.tempo", tick: 0, usPerQuarter: 500000 } ] }, // 120 BPM
         {
           name: "Sequential Melody",
-          channel: 0,
+          channel: 1,
           events: [
             { type: "program", tick: 0, program: 0 }, // Piano
             // 4分音符刻みでC4→D4→E4→F4

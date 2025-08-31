@@ -89,7 +89,7 @@ describe("Polyphony Playback Test", () => {
         { events: [ { type: "meta.tempo", tick: 0, usPerQuarter: 500000 } ] }, // 120 BPM
         {
           name: "Piano Chord",
-          channel: 0,
+          channel: 1,
           events: [
             { type: "program", tick: 0, program: 0 }, // Piano
             // 同時和音: 全て tick=0 で開始

@@ -35,7 +35,7 @@ describe("append_to_smf multi-track preservation", () => {
         { events: [ { type: "meta.tempo", tick: 0, usPerQuarter: 500000 } ] },
         {
           name: "Piano",
-          channel: 0,
+          channel: 1,
           events: [
             { type: "program", tick: 0, program: 0 },
             { type: "note", tick: 0, pitch: 60, velocity: 100, duration: 480 }, // C4
@@ -154,7 +154,7 @@ describe("append_to_smf multi-track preservation", () => {
       ppq: 480,
       tracks: [
         { events: [ { type: "meta.tempo", tick: 0, usPerQuarter: 500000 } ] }, // Track 0: Meta
-        { channel: 0, events: [ { type: "note", tick: 0, pitch: 60, velocity: 100, duration: 480 } ] }, // Track 1: Piano
+  { channel: 1, events: [ { type: "note", tick: 0, pitch: 60, velocity: 100, duration: 480 } ] }, // Track 1: Piano
         { channel: 1, events: [ { type: "note", tick: 0, pitch: 64, velocity: 100, duration: 480 } ] }, // Track 2: Bass
       ],
     };

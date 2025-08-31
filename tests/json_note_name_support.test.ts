@@ -30,7 +30,7 @@ describe("note name support", () => {
       ppq: 480,
       tracks: [
         { events: [ { type: "meta.tempo", tick: 0, usPerQuarter: 500000 } ] },
-        { channel: 0, events: [
+  { channel: 1, events: [
           { type: "program", tick: 0, program: 0 },
           { type: "note", tick: 0, note: "C4", velocity: 100, duration: 240 },
           { type: "note", tick: 480, note: "E4", velocity: 100, duration: 240 },

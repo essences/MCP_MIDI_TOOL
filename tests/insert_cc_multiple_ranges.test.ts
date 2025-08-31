@@ -30,7 +30,7 @@ describe("insert_cc - multiple ranges", () => {
       ppq: 480,
       tracks: [
         { events: [ { type: "meta.tempo", tick: 0, usPerQuarter: 500000 }, { type: "meta.timeSignature", tick: 0, numerator: 4, denominator: 4 } ] },
-        { channel: 0, events: [ { type: "program", tick: 0, program: 0 }, { type: "note", tick: 0, pitch: 60, velocity: 100, duration: 1920 } ] }
+  { channel: 1, events: [ { type: "program", tick: 0, program: 0 }, { type: "note", tick: 0, pitch: 60, velocity: 100, duration: 1920 } ] }
       ]
     };
 

@@ -37,7 +37,7 @@ describe("json_to_smf accepts Score DSL v1 (fallback)", () => {
       tracks: [
         {
           name: "Lead",
-          channel: 0,
+          channel: 1, // 外部表記1-16
           program: 0,
           events: [
             { type: "note", note: "C4", start: { bar: 1, beat: 1 }, duration: { value: "1/4" }, articulation: "staccato", velocity: 96 },
@@ -67,7 +67,7 @@ describe("json_to_smf accepts Score DSL v1 (fallback)", () => {
     const scoreStr = JSON.stringify({
       ppq: 480,
       meta: { timeSignature: { numerator: 4, denominator: 4 }, keySignature: { root: "C", mode: "major" }, tempo: { bpm: 120 } },
-      tracks: [ { channel: 0, program: 0, events: [ { type: "note", note: "C4", start: { bar: 1, beat: 1 }, duration: { value: "1/4" } } ] } ]
+      tracks: [ { channel: 1, program: 0, events: [ { type: "note", note: "C4", start: { bar: 1, beat: 1 }, duration: { value: "1/4" } } ] } ] // 外部表記1-16
     });
     sendLine(child, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "json_to_smf", arguments: { json: scoreStr, name: "score_dsl_demo2.mid", overwrite: true } } });
     const res = await readLine(child);

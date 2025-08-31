@@ -15,7 +15,7 @@ describe('json_to_smf FORMAT_MISMATCH / AUTO_DETECT_FAILED', ()=>{
     const child = spawnServer();
     send(child,{jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'vitest',version:'0'}}});
     await recv(child);
-    const jsonMidi = { format:1, ppq:480, tracks:[{ channel:0, events:[{ type:'note', tick:0, pitch:60, velocity:90, duration:240 }] }] };
+  const jsonMidi = { format:1, ppq:480, tracks:[{ channel:1, events:[{ type:'note', tick:0, pitch:60, velocity:90, duration:240 }] }] };
     send(child,{jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'json_to_smf',arguments:{ json: jsonMidi, format:'score_dsl_v1' }}});
     const res = await recv(child);
     expect(res.result?.error?.message).toMatch(/FORMAT_MISMATCH/);

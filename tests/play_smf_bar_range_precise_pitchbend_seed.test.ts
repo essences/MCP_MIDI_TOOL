@@ -23,7 +23,7 @@ const JSON_MIDI = {
       { type: 'meta.tempo', tick: 0, usPerQuarter: 500000 },
       { type: 'meta.tempo', tick: 1920, usPerQuarter: 400000 }, // tempo change at bar2 for precise mode gating
     ]},
-    { channel:0, program:0, events: [
+  { channel:1, program:0, events: [
       { type: 'pitchBend', tick: 0, value: 2048 },
       { type: 'note', tick: 0, duration: 1920, pitch: 60, velocity: 100 },
       { type: 'note', tick: 1920, duration: 480, pitch: 64, velocity: 100 },

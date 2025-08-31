@@ -89,7 +89,7 @@ describe('Extract and Replace Bars', () => {
       tracks: [
         { events: [{ type: "meta.tempo", usPerQuarter: 500000, tick: 0 }] },
         {
-          channel: 0,
+          channel: 1,
           events: [
             { type: "program", program: 0, tick: 0 },
             // 1小節目: C4 全音符
@@ -162,7 +162,7 @@ describe('Extract and Replace Bars', () => {
       tracks: [
         { events: [{ type: "meta.tempo", usPerQuarter: 500000, tick: 0 }] },
         {
-          channel: 0, 
+          channel: 1, 
           events: [
             { type: "program", program: 0, tick: 0 },
             // 1小節目: C4
@@ -226,7 +226,7 @@ describe('Extract and Replace Bars', () => {
       tracks: [
         { events: [{ type: "meta.tempo", usPerQuarter: 500000, tick: 0 }] },
         {
-          channel: 0,
+          channel: 1,
           events: [
             { type: "program", program: 0, tick: 0 },
             // 1小節目: C4
@@ -255,7 +255,7 @@ describe('Extract and Replace Bars', () => {
       tracks: [
         { events: [] }, // メタトラック
         {
-          channel: 0,
+          channel: 1,
           events: [
             { type: "note", pitch: 67, velocity: 110, tick: 0, duration: 1920 } // G4
           ]
@@ -310,7 +310,7 @@ describe('Extract and Replace Bars', () => {
       ppq: 480,
       tracks: [
         { events: [{ type: "meta.tempo", usPerQuarter: 500000, tick: 0 }] },
-        { channel: 0, events: [{ type: "program", program: 0, tick: 0 }] }
+  { channel: 1, events: [{ type: "program", program: 0, tick: 0 }] }
       ]
     };
 

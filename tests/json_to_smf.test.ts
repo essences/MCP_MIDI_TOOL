@@ -42,7 +42,7 @@ describe("json_to_smf tool", () => {
       tracks: [
         {
           name: "Piano",
-          channel: 0,
+          channel: 1,
           events: [
             { type: "meta.tempo", tick: 0, usPerQuarter: 500000 },
             { type: "program", tick: 0, program: 0 },

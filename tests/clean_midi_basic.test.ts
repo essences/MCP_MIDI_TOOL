@@ -14,7 +14,7 @@ describe('clean_midi basic', ()=>{
     await read(child);
 
     // base song
-  const base = { ppq:480, tracks:[ { events:[ { type:'meta.tempo', usPerQuarter:500000, tick:0 }, { type:'meta.timeSignature', numerator:4, denominator:4, tick:0 }, { type:'meta.keySignature', sf:0, mi:0, tick:0 } ] }, { channel:0, events:[ { type:'note', note:'C4', velocity:96, tick:0, duration:240 } ] } ] };
+  const base = { ppq:480, tracks:[ { events:[ { type:'meta.tempo', usPerQuarter:500000, tick:0 }, { type:'meta.timeSignature', numerator:4, denominator:4, tick:0 }, { type:'meta.keySignature', sf:0, mi:0, tick:0 } ] }, { channel:1, events:[ { type:'note', note:'C4', velocity:96, tick:0, duration:240 } ] } ] };
     send(child,{ jsonrpc:'2.0', id:2, method:'tools/call', params:{ name:'json_to_smf', arguments:{ json:base, format:'json_midi_v1', name:'dup_clean_base.mid' } } });
     const r1 = await read(child);
     // eslint-disable-next-line no-console
@@ -24,7 +24,7 @@ describe('clean_midi basic', ()=>{
     expect(typeof fileId1).toBe('string');
 
     // introduce duplication (tempo + channel split)
-    const dupChunk = { ppq:480, tracks:[ { events:[ { type:'meta.tempo', usPerQuarter:500000, tick:0 } ] }, { channel:0, events:[ { type:'note', note:'E4', velocity:90, tick:0, duration:240 } ] }, { channel:1, events:[ { type:'note', note:'G4', velocity:88, tick:0, duration:240 } ] } ] };
+  const dupChunk = { ppq:480, tracks:[ { events:[ { type:'meta.tempo', usPerQuarter:500000, tick:0 } ] }, { channel:1, events:[ { type:'note', note:'E4', velocity:90, tick:0, duration:240 } ] }, { channel:2, events:[ { type:'note', note:'G4', velocity:88, tick:0, duration:240 } ] } ] };
     send(child,{ jsonrpc:'2.0', id:3, method:'tools/call', params:{ name:'append_to_smf', arguments:{ fileId:fileId1, json:dupChunk, format:'json_midi_v1', atEnd:true, outputName:'dup_clean_base2.mid' } } });
     const r2 = await read(child);
     const body2 = JSON.parse(r2.result.content[0].text);

@@ -11,7 +11,7 @@ describe("Score DSL → JSON MIDI v1 (advanced)", () => {
         tempo: { bpm: 120 }
       },
       tracks: [
-        { channel: 0, program: 0, events: [
+        { channel: 1, program: 0, events: [ // 外部表記1-16
           { type: "note", note: "C4", start: { bar:1, beat:1 }, duration: { value: "1/4" } },
           // tieで直後に同pitchを連結（1/8）
           { type: "note", note: "C4", start: { bar:1, beat:2 }, duration: { value: "1/8" }, tie: true },
@@ -41,7 +41,7 @@ describe("Score DSL → JSON MIDI v1 (advanced)", () => {
         tempo: { changes: [ { bar:1, beat:1, bpm: 120 }, { bar:2, beat:1, bpm: 90 } ] }
       },
       tracks: [
-        { channel: 0, program: 0, events: [
+        { channel: 1, program: 0, events: [ // 外部表記1-16
           // 16分3連符（8分の空間に3つ）: base(1/16=120) → tuplet(2/3) → 80
           { type: "note", note: "G4", start: { bar:1, beat:1 }, duration: { value: "1/16", tuplet: { inSpaceOf: 2, play: 3 } } },
           { type: "note", note: "A4", start: { bar:1, beat:1, unit: 3, offset: 1 }, duration: { value: "1/16", tuplet: { inSpaceOf: 2, play: 3 } } },

@@ -56,7 +56,7 @@ describe('trigger_notes channel mapping', () => {
     const child = spawnServer();
     sendLine(child, { jsonrpc:'2.0', id:1, method:'initialize', params:{ protocolVersion:'2025-06-18', capabilities:{}, clientInfo:{ name:'vitest', version:'0' } } });
     await readLine(child);
-    sendLine(child, { jsonrpc:'2.0', id:2, method:'tools/call', params:{ name:'trigger_notes', arguments:{ notes:['C4'], channel:0, dryRun:true } } });
+  sendLine(child, { jsonrpc:'2.0', id:2, method:'tools/call', params:{ name:'trigger_notes', arguments:{ notes:['C4'], channel:1, dryRun:true } } });
     const res = await readLine(child);
     expect(res.error).toBeUndefined();
     const body = JSON.parse(res.result.content[0].text);

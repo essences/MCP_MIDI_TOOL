@@ -161,7 +161,7 @@ describe("Real Twinkle File Debug", () => {
         { events: [ { type: "meta.tempo", tick: 0, usPerQuarter: 500000 } ] }, // 120 BPM
         {
           name: "Proper Twinkle",
-          channel: 0,
+          channel: 1,
           events: [
             { type: "program", tick: 0, program: 0 },
             // "Twinkle, twinkle, little star" (C C G G A A G)

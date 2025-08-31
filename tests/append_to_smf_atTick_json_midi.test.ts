@@ -36,7 +36,7 @@ describe("append_to_smf (atTick) with JSON MIDI v1", () => {
         { events: [ { type: "meta.tempo", tick: 0, usPerQuarter: 500000 } ] },
         {
           name: "Piano",
-          channel: 0,
+          channel: 1,
           events: [
             { type: "program", tick: 0, program: 0 },
             { type: "note", tick: 0, pitch: 60, velocity: 100, duration: 480 },
@@ -59,7 +59,7 @@ describe("append_to_smf (atTick) with JSON MIDI v1", () => {
       tracks: [
         {
           name: "Piano2",
-          channel: 0,
+          channel: 1,
           events: [
             { type: "program", tick: 0, program: 1 },
             { type: "note", tick: 0, pitch: 64, velocity: 90, duration: 240 },
