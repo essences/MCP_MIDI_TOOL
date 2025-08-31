@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "mcp-midi-tool": {
+      "command": "node",
+      "args": ["dist/index.js"],
+      "cwd": "/Users/hayashieiichi/MCP_MIDI_TOOL",
+      "env": {
+        "MCP_MIDI_MANIFEST": "/Users/hayashieiichi/MCP_MIDI_TOOL/data/manifest.json"
+      }
+    }
+  }
+}

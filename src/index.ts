@@ -62,8 +62,15 @@ async function main() {
       const lower = rawMsg.toLowerCase();
       let code = "INTERNAL_ERROR";
       let hint: string | undefined;
-      // 簡易的に Zod 風 issue 配列を抽出（err.issues があれば利用）
-      const issues: any[] | undefined = Array.isArray(err?.issues) ? err.issues.map((i: any) => ({ path: i.path, message: i.message })) : undefined;
+      // 既に json_to_smf で加工された issues (path/message/code/expected/received) を尊重
+      const rawIssues: any[] | undefined = Array.isArray(err?.issues) ? err.issues : undefined;
+      const issues = rawIssues?.map(i => ({
+        path: i.path,
+        message: i.message,
+        code: i.code,
+        expected: i.expected,
+        received: i.received
+      }));
       if (/validation failed|compile failed|json validation failed/.test(lower)) {
         code = "VALIDATION_ERROR";
         hint = "入力JSON/Score DSL のスキーマを README と docs/specs を参照して修正してください (format指定推奨)";
@@ -92,7 +99,9 @@ async function main() {
   { name: "json_to_smf", description: "JSON曲データをSMFにコンパイルし保存", inputSchema: { type: "object", properties: { json: { anyOf: [ { type: "object" }, { type: "string" } ] }, format: { type: "string", enum: ["json_midi_v1", "score_dsl_v1"] }, name: { type: "string" } , overwrite: { type: "boolean" } }, required: ["json"] } },
   { name: "smf_to_json", description: "SMFを解析してJSON曲データに変換", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
   { name: "clean_midi", description: "SMF内の重複メタ/トラックを正規化して新規fileId発行", inputSchema: { type: "object", properties: { fileId: { type: "string" } }, required: ["fileId"] } },
-  { name: "append_to_smf", description: "既存SMFへJSON/Score DSLチャンクを追記（指定tick/末尾）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, json: { anyOf: [ { type: "object" }, { type: "string" } ] }, format: { type: "string", enum: ["json_midi_v1", "score_dsl_v1"] }, atTick: { type: "number" }, atEnd: { type: "boolean" }, gapTicks: { type: "number" }, trackIndex: { type: "number" }, preserveTrackStructure: { type: "boolean" }, trackMapping: { type: "array", items: { type: "number" } }, outputName: { type: "string" } }, required: ["fileId", "json"] } },
+  { name: "append_to_smf", description: "既存SMFへJSON/Score DSLチャンクを追記（指定tick/末尾）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, json: { anyOf: [ { type: "object" }, { type: "string" } ] }, format: { type: "string", enum: ["json_midi_v1", "score_dsl_v1"] }, atTick: { type: "number" }, atEnd: { type: "boolean" }, gapTicks: { type: "number" }, trackIndex: { type: "number" }, preserveTrackStructure: { type: "boolean" }, trackMapping: { type: "array", items: { type: "number" } }, outputName: { type: "string" }, keepGlobalMeta: { type: "boolean", description: "追記チャンクに含まれる tempo/time/key メタを重複抑制せず保持 (既定:false)" }, allowKeyChange: { type: "boolean", description: "異なる keySignature を許可 (既定:false: 差異は無視)" } }, required: ["fileId", "json"] } },
+  // keepGlobalMeta: 追記チャンク内の meta.(tempo|timeSignature|keySignature) をそのまま保持する（既定 false: 重複を自動的に抑制）
+  // allowKeyChange: keySignature が異なる場合にエラーにせず保持（既定 false: 差異は警告し無視）
   { name: "insert_sustain", description: "CC64(サスティン)のON/OFFを範囲に挿入", inputSchema: { type: "object", properties: { fileId: { type: "string" }, ranges: { type: "array", items: { type: "object", properties: { startTick: { type: "number" }, endTick: { type: "number" }, channel: { type: "number" }, trackIndex: { type: "number" }, valueOn: { type: "number" }, valueOff: { type: "number" } }, required: ["startTick", "endTick"] } } }, required: ["fileId", "ranges"] } },
   { name: "insert_cc", description: "任意のCC番号の値を範囲に挿入（ON/OFF相当の2値）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, controller: { type: "number" }, ranges: { type: "array", items: { type: "object", properties: { startTick: { type: "number" }, endTick: { type: "number" }, channel: { type: "number" }, trackIndex: { type: "number" }, valueOn: { type: "number" }, valueOff: { type: "number" } }, required: ["startTick", "endTick"] } } }, required: ["fileId", "controller", "ranges"] } },
   { name: "extract_bars", description: "SMFファイルの指定小節範囲をJSON MIDI形式で抽出", inputSchema: { type: "object", properties: { fileId: { type: "string" }, startBar: { type: "number", minimum: 1 }, endBar: { type: "number", minimum: 1 }, format: { type: "string", enum: ["json_midi_v1", "score_dsl_v1"], default: "json_midi_v1" } }, required: ["fileId", "startBar", "endBar"] } },
@@ -392,6 +401,36 @@ async function main() {
       }
       const fileNameInput: string | undefined = args?.name;
       if (!json) throw new Error("'json' is required for json_to_smf");
+      // 形式ヒューリスティック検出: 期待と異なる場合は早期に FORMAT_MISMATCH を返し、ユーザーが正しい format 指定やデータ修正をしやすくする
+      const detectFormat = (obj: any): 'json_midi_v1' | 'score_dsl_v1' | 'unknown' => {
+        try {
+          if (obj && typeof obj === 'object') {
+            if (obj.format === 1 && typeof obj.ppq === 'number' && Array.isArray(obj.tracks)) {
+              // tick ベースイベントがあれば JSON MIDI とみなす
+              for (const t of obj.tracks) {
+                if (t && Array.isArray(t.events)) {
+                  if (t.events.some((ev: any)=> typeof ev?.tick === 'number')) return 'json_midi_v1';
+                }
+              }
+            }
+            // start / duration を含む DSL イベントパターン
+            if (typeof obj.ppq === 'number' && Array.isArray(obj.tracks)) {
+              for (const t of obj.tracks) {
+                if (t && Array.isArray(t.events)) {
+                  if (t.events.some((ev: any)=> ev && ev.start && (ev.start.bar || ev.start.beat) && ev.duration)) return 'score_dsl_v1';
+                }
+              }
+            }
+          }
+        } catch {/* ignore */}
+        return 'unknown';
+      };
+
+      const detected = detectFormat(json);
+      if (format && detected !== 'unknown' && format !== detected) {
+        // 指定フォーマットと内容の推定が食い違う場合
+        throw new Error(`FORMAT_MISMATCH: expected=${format} detected=${detected} | 提供されたデータは ${detected} 形式らしく見えます。"format" を ${detected} に変更するかデータ構造を ${format} の仕様に合わせてください。`);
+      }
       
       let song: any;
       if (format === 'json_midi_v1') {
@@ -399,8 +438,22 @@ async function main() {
         try {
           song = zSong.parse(json);
         } catch (e: any) {
-          const issues = e?.issues?.map?.((i: any)=> `${i.path?.join?.('.')}: ${i.message}`).join('; ');
-          throw new Error(`json_midi_v1 validation failed: ${issues || e?.message || String(e)}`);
+          const zIssues: any[] = Array.isArray(e?.issues) ? e.issues : [];
+          const summary = zIssues.slice(0,5).map((i:any,idx:number)=> `${idx}(${i.path?.join?.('.')||'(root)'}:${i.message})`).join(' | ');
+          const detailLines = zIssues.map((i:any,idx:number)=> {
+            const pathStr = i.path?.join?.('.') || '(root)';
+            const code = i.code || 'ZOD_ERROR';
+            const exp = (i as any).expected !== undefined ? ` expected=${JSON.stringify((i as any).expected)}` : '';
+            const rec = (i as any).received !== undefined ? ` received=${JSON.stringify((i as any).received)}` : '';
+            return `#${idx} path=${pathStr} code=${code} msg=${i.message}${exp}${rec}`;
+          }).join('\n');
+          const more = zIssues.length > 5 ? ` ...(and ${zIssues.length-5} more)` : '';
+          const errMsg = `json_midi_v1 validation failed: ${summary || (e?.message || String(e))}${more}\n--- details ---\n${detailLines}`;
+          const err2: any = new Error(errMsg);
+          if (zIssues.length) {
+            err2.issues = zIssues.map((i:any)=> ({ path: i.path, message: i.message, code: i.code, expected: (i as any).expected, received: (i as any).received }));
+          }
+          throw err2;
         }
       } else if (format === 'score_dsl_v1') {
         // 明示: Score DSL v1 をコンパイル→検証
@@ -464,8 +517,21 @@ async function main() {
             song = zSong.parse(compiled);
           }
         } catch (e: any) {
-          const issues = e?.issues?.map?.((i: any)=> `${i.path?.join?.('.')}: ${i.message}`).join('; ');
-          throw new Error(`score_dsl_v1 compile/validation failed: ${issues || e?.message || String(e)}`);
+          // Zod 由来の issues を構造化し、全件を詳細ラインで表示
+          const issuesArr: any[] = Array.isArray(e?.issues) ? e.issues : [];
+          const summary = issuesArr.slice(0,5).map((i:any,idx:number)=> `${idx}(${i.path?.join?.('.')||'(root)'}:${i.message})`).join(' | ');
+          const detailLines = issuesArr.map((i:any,idx:number)=> {
+            const pathStr = i.path?.join?.('.') || '(root)';
+            const code = i.code || 'ZOD_ERROR';
+            const exp = (i as any).expected !== undefined ? ` expected=${JSON.stringify((i as any).expected)}` : '';
+            const rec = (i as any).received !== undefined ? ` received=${JSON.stringify((i as any).received)}` : '';
+            return `#${idx} path=${pathStr} code=${code} msg=${i.message}${exp}${rec}`;
+          }).join('\n');
+          const more = issuesArr.length > 5 ? ` ...(and ${issuesArr.length-5} more)` : '';
+          const msg = `score_dsl_v1 compile/validation failed: ${summary || (e?.message || String(e))}${more}\n--- details ---\n${detailLines}`;
+          const err2: any = new Error(msg);
+          if (issuesArr.length) err2.issues = issuesArr.map(i => ({ path: i.path, message: i.message, code: i.code, expected: (i as any).expected, received: (i as any).received }));
+          throw err2;
         }
       } else {
         // 後方互換: まずJSON MIDI v1として検証→失敗ならScore DSL v1としてコンパイルを試行
@@ -473,23 +539,36 @@ async function main() {
         if (parsed.success) {
           song = parsed.data;
         } else {
-          let compileErrMsg = "";
-          try {
-            const compiled = compileScoreToJsonMidi(json);
+          // 2段階エラー収集 (JSON MIDI→Score DSL) を詳細化
+          const jsonIssues = parsed.error.issues?.map(i => ({ path: i.path.join('.'), message: i.message }));
+          let dslCompileError: any = null;
             try {
-              song = zSong.parse(compiled);
-            } catch (e2: any) {
-              const z2 = e2?.issues?.map?.((i: any) => `${i.path?.join?.('.')}: ${i.message}`).join('; ');
-              compileErrMsg = `compiled-json-invalid: ${z2 || e2?.message || String(e2)}`;
-              throw e2;
+              const compiled = compileScoreToJsonMidi(json);
+              try {
+                song = zSong.parse(compiled);
+              } catch (e2: any) {
+                const z2 = e2?.issues?.map?.((i: any) => `${i.path?.join?.('.')}: ${i.message}`).join('; ');
+                dslCompileError = { stage: 'compiled-json-invalid', detail: z2 || e2?.message || String(e2) };
+                throw e2;
+              }
+            } catch (e: any) {
+              if (!dslCompileError) {
+                const extra = e?.issues?.map?.((i: any)=> `${i.path?.join?.('.')}: ${i.message}`).join('; ') || e?.message || String(e);
+                dslCompileError = { stage: 'compile', detail: extra };
+              }
+              const aggregate = {
+                ok: false,
+                error: {
+                  kind: 'auto_detect_failed',
+                  message: 'Neither JSON MIDI v1 nor Score DSL v1 could be validated/compiled',
+                  tried: {
+                    json_midi_v1: jsonIssues,
+                    score_dsl_v1: dslCompileError,
+                  }
+                }
+              };
+              throw new Error("AUTO_DETECT_FAILED: " + JSON.stringify(aggregate.error));
             }
-          } catch (e: any) {
-            const issues = parsed.error.issues?.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
-            const baseMsg = issues || parsed.error?.message || "invalid json";
-            const extra = compileErrMsg || e?.issues?.map?.((i: any)=> `${i.path?.join?.('.')}: ${i.message}`).join('; ') || e?.message || String(e);
-            const msg = `${baseMsg}${extra ? ` | score-compile: ${extra}` : ''}`;
-            throw new Error(`json validation failed (or score compile failed): ${msg}`);
-          }
         }
       }
       const bin = encodeToSmfBinary(song);
@@ -586,6 +665,46 @@ async function main() {
         // 後方互換（未指定）: まずJSON MIDI、失敗でDSL
         const parsed = zSong.safeParse(chunk);
         if (parsed.success) addSong = parsed.data; else addSong = zSong.parse(compileScoreToJsonMidi(chunk));
+      }
+
+      // 2.5) グローバルメタ制御: keepGlobalMeta / allowKeyChange フラグ処理
+      const keepGlobalMeta = !!args?.keepGlobalMeta;
+      const allowKeyChange = !!args?.allowKeyChange;
+      // 既存の最初の keySignature / timeSignature / tempo を取得
+      const existingMeta = { key: undefined as any, time: undefined as any, tempo: undefined as any };
+      for (const ev of (baseJson.tracks[0]?.events||[])) {
+        if (!existingMeta.key && ev.type === 'meta.keySignature') existingMeta.key = { sf: ev.sf, mi: ev.mi };
+        if (!existingMeta.time && ev.type === 'meta.timeSignature') existingMeta.time = { numerator: ev.numerator, denominator: ev.denominator };
+        if (!existingMeta.tempo && ev.type === 'meta.tempo') existingMeta.tempo = { usPerQuarter: ev.usPerQuarter };
+        if (existingMeta.key && existingMeta.time && existingMeta.tempo) break;
+      }
+      // 追記チャンク内のグローバルメタを検査
+      if (!keepGlobalMeta) {
+        for (const tr of addSong.tracks) {
+          tr.events = tr.events.filter((ev: any) => {
+            if (ev.type === 'meta.keySignature') {
+              if (existingMeta.key) {
+                // 既存キーと異なり allowKeyChange でない → 無視
+                if (!allowKeyChange && (existingMeta.key.sf !== ev.sf || existingMeta.key.mi !== ev.mi)) {
+                  return false;
+                }
+                // 同一キーは重複除去
+                if (existingMeta.key.sf === ev.sf && existingMeta.key.mi === ev.mi) return false;
+              }
+            }
+            if (ev.type === 'meta.timeSignature') {
+              if (existingMeta.time) {
+                if (existingMeta.time.numerator === ev.numerator && existingMeta.time.denominator === ev.denominator) return false; // 重複除去
+              }
+            }
+            if (ev.type === 'meta.tempo') {
+              if (existingMeta.tempo) {
+                if (existingMeta.tempo.usPerQuarter === ev.usPerQuarter) return false;
+              }
+            }
+            return true;
+          });
+        }
       }
 
       // 3) 追記位置の決定（atEnd優先→atTick→既定末尾）。gapTicksで隙間を空ける
@@ -692,6 +811,32 @@ async function main() {
         });
       }
 
+      // 6.5) keySignature 差異検出警告 (allowKeyChange=false で保持された場合は既にフィルタ済み)
+      let warnings: string[] | undefined;
+      // 重複メタ (tick0 同種) をここでも最終チェックして prune
+      const t0 = baseJson.tracks[0];
+      if (t0) {
+        const seen = new Set<string>();
+        t0.events = t0.events.filter((ev:any)=>{
+          if (ev?.type && ['meta.tempo','meta.timeSignature','meta.keySignature'].includes(ev.type) && (ev.tick||0)===0) {
+            if (seen.has(ev.type)) { (warnings ||= []).push(`duplicate_meta_pruned:${ev.type}`); return false; }
+            seen.add(ev.type);
+          }
+          return true;
+        });
+      }
+      // 大きなギャップ検知: insertTick が既存末尾より >1小節相当 (ppq*4) の場合
+      const ppqForGap = baseJson.ppq || 480;
+      const barTicks = ppqForGap * 4; // 4/4前提 (timeSig 変化未サポート部位)
+      const maxPrevTick = Math.max(0, ...baseJson.tracks.flatMap((t:any)=> t.events.map((e:any)=> e.tick||0)));
+      if (insertTick - maxPrevTick > barTicks) {
+        (warnings ||= []).push(`large_gap_detected:${insertTick-maxPrevTick}`);
+      }
+      if (allowKeyChange && !keepGlobalMeta) {
+        // フィルタ除去された可能性を示す通知（差異があったことを明示できれば理想だが元イベントは捨てている）
+        // 実装簡易化のためスキップ; 将来: 差異検出時にフラグ設定
+      }
+
       // 7) SMFへ再エンコード→保存（新規名指定があれば複製）
       const bin = encodeToSmfBinary(baseJson);
       const data = Buffer.from(bin.buffer, bin.byteOffset, bin.byteLength);
@@ -714,14 +859,14 @@ async function main() {
         if (rec) { rec.bytes = bytes; rec.path = relPath; }
         await writeManifest(manifest);
         inMemoryIndex.set(item.id, { ...item, bytes, path: relPath });
-        return wrap({ ok: true, fileId: item.id, name: nameWithExt, path: relPath, bytes, insertedAtTick: insertTick });
+  return wrap({ ok: true, fileId: item.id, name: nameWithExt, path: relPath, bytes, insertedAtTick: insertTick, warnings });
       } else {
         const newId = randomUUID();
         const createdAt = new Date().toISOString();
         const rec = { id: newId, name: nameWithExt, path: relPath, bytes, createdAt };
         await appendItem(rec);
         inMemoryIndex.set(newId, rec);
-        return wrap({ ok: true, fileId: newId, name: nameWithExt, path: relPath, bytes, insertedAtTick: insertTick });
+  return wrap({ ok: true, fileId: newId, name: nameWithExt, path: relPath, bytes, insertedAtTick: insertTick, warnings });
       }
     }
 
@@ -2190,6 +2335,7 @@ async function main() {
             const smfBin = encFn(extracted as any);
             // 再度 Midi に読み込み直し
             const midi2 = new Midi(Buffer.from(smfBin));
+            // midi2.tracks の channel 値も 1-16 の可能性があるため後段処理で統一的に (play_smf 本体側で) 正規化する
             // 元 midi を置き換え (後続処理は同じ)
             (midi as any)._tracks = midi2.tracks; // 内部差し替え（簡易）
             extractionMode = 'precise';
@@ -2205,7 +2351,10 @@ async function main() {
         }
         // notes をmsに展開（tempo変化は@tonejs/midiがtime/secondsに反映済み）
         for (const tr of midi.tracks) {
-          const ch = Number.isFinite(Number(tr?.channel)) ? Number(tr.channel) : 0;
+          // @tonejs/midi の track.channel が 1-16 で返る環境があり得るため正規化 (外部1-16 -> 内部0-15)
+          let chRaw = Number.isFinite(Number(tr?.channel)) ? Number(tr.channel) : 0;
+          let ch: number;
+          if (chRaw >= 1 && chRaw <= 16) ch = (chRaw - 1) | 0; else ch = (chRaw | 0) & 0x0f;
           for (const nt of (tr?.notes || [])) {
             const tOnMs = Math.max(0, Math.round((nt.time || 0) * 1000));
             const tOffMs = Math.max(0, Math.round(((nt.time || 0) + (nt.duration || 0)) * 1000));

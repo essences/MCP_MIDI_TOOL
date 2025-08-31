@@ -36,15 +36,21 @@ export function cleanJsonMidiSong(song: AnySong): { cleaned: AnySong; removedMet
   const canonicalTS: any[] = [];
   const canonicalKS: any[] = [];
   let removedMeta = 0;
-  // Gather & dedupe metas
+  // Gather & dedupe metas (retain earliest tick occurrence of each type)
   for (const tr of song.tracks) {
     tr.events = tr.events.filter(ev => {
-      if (ev?.type === 'meta.tempo') {
-        if (canonicalTempo.length === 0) canonicalTempo.push(ev); else { removedMeta++; return false; }
-      } else if (ev?.type === 'meta.timeSignature') {
-        if (canonicalTS.length === 0) canonicalTS.push(ev); else { removedMeta++; return false; }
-      } else if (ev?.type === 'meta.keySignature') {
-        if (canonicalKS.length === 0) canonicalKS.push(ev); else { removedMeta++; return false; }
+      if (!ev || typeof ev.type !== 'string') return true;
+      if (ev.type === 'meta.tempo') {
+        if (canonicalTempo.length === 0) { canonicalTempo.push(ev); return false; } // pull out into canonical set
+        removedMeta++; return false;
+      }
+      if (ev.type === 'meta.timeSignature') {
+        if (canonicalTS.length === 0) { canonicalTS.push(ev); return false; }
+        removedMeta++; return false;
+      }
+      if (ev.type === 'meta.keySignature') {
+        if (canonicalKS.length === 0) { canonicalKS.push(ev); return false; }
+        removedMeta++; return false;
       }
       return true;
     });
@@ -72,7 +78,20 @@ export function cleanJsonMidiSong(song: AnySong): { cleaned: AnySong; removedMet
   }
 
   // Rebuild track list: one meta track (track0) containing canonical metas + orphan events, then channel tracks
+  // Canonical metas forced to tick 0 (if they had tick>0) and unique per type
+  for (const ev of [...canonicalTempo, ...canonicalTS, ...canonicalKS]) { ev.tick = 0; }
   const track0 = { events: [...canonicalTempo, ...canonicalTS, ...canonicalKS, ...orphanEvents] } as any;
+  // Remove any accidental duplicate meta of same type at same tick that slipped in via orphanEvents
+  const seenMetaTypes = new Set<string>();
+  track0.events = track0.events.filter((ev: any) => {
+    if (ev?.type?.startsWith('meta.')) {
+      if (['meta.tempo','meta.timeSignature','meta.keySignature'].includes(ev.type)) {
+        if (seenMetaTypes.has(ev.type)) { removedMeta++; return false; }
+        seenMetaTypes.add(ev.type);
+      }
+    }
+    return true;
+  });
   track0.events.sort((a: any, b: any)=> (a.tick||0)-(b.tick||0));
   const newTracks = [track0, ...Array.from(byChannel.values())];
   const cleaned: AnySong = { ppq: song.ppq, tracks: newTracks };
