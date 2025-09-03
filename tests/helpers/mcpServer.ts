@@ -8,9 +8,10 @@ export interface McpTestServer {
   shutdown: () => Promise<void>;
 }
 
-export async function spawnMcpServer(startTimeoutMs = 4000): Promise<McpTestServer> {
-  const child = spawn('node', [path.resolve('./dist/index.js')], { stdio: ['pipe','pipe','pipe'] });
+export async function spawnMcpServer(startTimeoutMs = 4000, envOverrides?: Record<string,string>): Promise<McpTestServer & { readyPayload?: any }> {
+  const child = spawn('node', [path.resolve('./dist/index.js')], { stdio: ['pipe','pipe','pipe'], env: { ...process.env, ...(envOverrides||{}) } });
   let ready = false;
+  let readyPayload: any | undefined;
   await new Promise<void>((resolve) => {
     const timeout = setTimeout(() => { resolve(); }, startTimeoutMs);
     let buffer = '';
@@ -22,7 +23,7 @@ export async function spawnMcpServer(startTimeoutMs = 4000): Promise<McpTestServ
         try {
           const parsed = JSON.parse(line);
           if (parsed && parsed.ready) {
-            ready = true; clearTimeout(timeout); child.stdout?.off('data', onData); resolve();
+            ready = true; readyPayload = parsed; clearTimeout(timeout); child.stdout?.off('data', onData); resolve();
             return;
           }
         } catch { /* ignore non JSON lines */ }
@@ -66,5 +67,5 @@ export async function spawnMcpServer(startTimeoutMs = 4000): Promise<McpTestServ
     }
   };
 
-  return { process: child, ready, send, shutdown };
+  return { process: child, ready, send, shutdown, readyPayload };
 }

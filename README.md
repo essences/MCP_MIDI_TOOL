@@ -110,6 +110,50 @@ Score DSL → JSON MIDI コンパイル時に、演奏表現を補助するCCイ
    - meta.trackName（デコード/エンコード対応）
 - スキーマ定義済み・今後実装拡充: aftertouch.channel / aftertouch.poly（エンコード/デコードとも対応予定）
 
+## 環境変数 (Environment Variables)
+
+| 変数名 | 説明 | デフォルト |
+|--------|------|------------|
+| `MCP_MIDI_MANIFEST_THRESHOLD` | マニフェスト内アイテム数の閾値。超過すると `manifestItemsThresholdExceeded` が ready ペイロードで `true` になり、stderr に WARN を出力。 | `5000` |
+| `MCP_MIDI_EMIT_READY` | `1` のときのみ起動時に ready ペイロード(JSON 1行)を stdout に出力。既存クライアントとの後方互換性維持のためデフォルト非出力。 | (未設定) |
+
+## ready ペイロード構造 (オプトイン時 `MCP_MIDI_EMIT_READY=1`)
+```json
+{
+  "ready": true,
+  "coldStartMs": 123,
+  "warmup": {
+    "manifest": { "count": 1234, "ms": 45 },
+    "schema": { "compiled": true, "ms": 12 },
+    "midi": { "dynamicImport": true }
+  },
+  "manifestCache": { "path": "data/manifest.XXXXX.json", "exists": true },
+  "manifestItemsThresholdExceeded": false,
+  "manifestThreshold": 5000
+}
+```
+
+### フィールド解説
+- `manifestItemsThresholdExceeded`: マニフェスト件数 >= 閾値で true。
+- `manifestThreshold`: 判定に利用した閾値値。
+- `coldStartMs`: プロセス開始から ready 出力までのおおよその経過ミリ秒。
+- `warmup.manifest.count`: 読み込んだアイテム数。
+- `warmup.manifest.ms`: マニフェスト読込所要時間。
+- `warmup.schema.ms`: スキーマ初期化所要時間。
+- `manifestCache.path`: 利用されたマニフェストキャッシュファイルパス。
+
+## WARN ログ
+閾値を超えると stderr に以下形式の警告が出力されます:
+```
+[WARN] manifest item count high: <count> >= <threshold>
+```
+
+## テストにおける利用例
+特定テストで ready ペイロードを検証する場合:
+```
+MCP_MIDI_EMIT_READY=1 MCP_MIDI_MANIFEST_THRESHOLD=50 vitest run tests/manifest_threshold_ready.test.ts
+```
+
 ## 主な機能（MCP Tools）
 - store_midi: base64のMIDIを保存し、fileIdを返す
 - get_midi: メタ情報を返し、任意でbase64を同梱
@@ -291,7 +335,6 @@ feed_single_capture の events 形式:
 { "tool":"get_single_capture_status", "arguments": { "captureId":"<id>" } }
 // -> reason:'timeout', result.notes:[]
 ```
-```
 ```jsonc
 { "tool":"start_single_capture", "arguments": { "maxWaitMs":400 } }
 // 500ms後 status
@@ -403,337 +446,45 @@ MIDI入力デバイスから演奏全体を継続的に記録し、自動また�
 - meta.trackName: `{ type:"meta.trackName", tick, text<=128 }`
 
 ## 環境変数 (Environment Variables)
-パフォーマンス調整や挙動切替のために以下を利用できます:
 
-| 変数名 | 目的 | 値例 | 既定 | 効果 |
-|--------|------|------|------|------|
-| `MCP_MIDI_MANIFEST` | マニフェストファイル名固定 | `manifest.shared.json` | `manifest.<pid>.json` | 並列プロセス間で共有/分離を制御 |
-| `MCP_MIDI_BASE_DIR` | data/ のベースパス変更 | `/tmp/mcp-midi` | プロジェクトルート | データ出力先の再配置 |
-| `MCP_MIDI_MANIFEST_NOCACHE` | マニフェスト読込キャッシュ無効化 | `1` | (未設定) | 毎回 fs.stat/read 実行（デバッグ/一貫性比較） |
-| `MCP_MIDI_PLAY_SMF_BAR_MODE` | 小節抽出モード強制 | `simple` / `precise` | `precise`(予定) | simple 指定で旧ロジックへフォールバック（将来実装） |
+| 変数名 | 説明 | デフォルト |
+|--------|------|------------|
+| `MCP_MIDI_MANIFEST_THRESHOLD` | マニフェスト内アイテム数の閾値。超過すると `manifestItemsThresholdExceeded` が ready ペイロードで `true` になり、stderr に WARN を出力。 | `5000` |
+| `MCP_MIDI_EMIT_READY` | `1` のときのみ起動時に ready ペイロード(JSON 1行)を stdout に出力。既存クライアントとの後方互換性維持のためデフォルト非出力。 | (未設定) |
 
-ready シグナル出力例（起動直後 stdout 1行 JSON）:
-```jsonc
-{ "ready": true, "coldStartMs": 142.7, "warmup": { "manifest": {"ms":5.1,"items":12}, "schema": {"ms":18.4}, "midi": {"ms":0.4,"output":false,"input":false} }, "manifestCache": "enabled" }
-```
-テスト/クライアントはこの行受信後にリクエスト送信を開始すると初回ウォームアップによるフレークを防止できます。
-
-フィールド説明:
-- `coldStartMs`: プロセス開始から ready 発行までの総時間
-- `warmup.manifest.ms`: マニフェスト読み込み処理時間（キャッシュ後は低減）
-- `warmup.manifest.items`: マニフェスト内の登録MIDI件数
-- `warmup.schema.ms`: Score DSL → JSON MIDI の最初の軽量コンパイル時間
-- `warmup.midi.ms`: node-midi 動的 import 判定時間
-- `manifestCache`: `enabled` / `disabled` （`MCP_MIDI_MANIFEST_NOCACHE=1` で disabled）
-
-大量マニフェスト警告ポリシー（将来拡張予定）:
-- 起動時 `warmup.manifest.items` が閾値（例: 5000）を超える場合、stderr に `WARN manifest item count high` を出力予定
-- 目的: 初期化遅延の可視化と CI の上限設定
-- 現状はログ未実装（テストが安定しているため）。必要になり次第 `process.stderr.write` ベースで追加。
-
-### MCPクライアントからの呼び出し例（擬似）
-以下はMCPクライアントが送るpayloadの概略です（実際はクライアント実装に依存）。
-
-json_to_smf:
-（内部 JSON MIDI の例。チャンネルは 0〜15（ch1=0）で表現されます。外部指定は 1〜16 を使用してください）
-```jsonc
-{
-   "tool": "json_to_smf",
-   "arguments": {
-    "json": { "ppq":480, "tracks":[ {"events":[{"type":"meta.tempo","tick":0,"usPerQuarter":500000}]}, {"channel":0,"events":[{"type":"program","tick":0,"program":0},{"type":"note","tick":0,"pitch":60,"velocity":100,"duration":960}]} ] },
-         "format": "json_midi_v1",
-      "name": "example.json",
-      "overwrite": true
-   }
-}
-```
-
-Score DSL を直接渡す例（オブジェクト or JSON文字列のどちらでも可）:
-```jsonc
-{
-   "tool": "json_to_smf",
-   "arguments": {
-      "json": {
-         "ppq": 480,
-         "meta": { "timeSignature": { "numerator": 4, "denominator": 4 }, "tempo": { "bpm": 120 } },
-         "tracks": [ { "channel": 1, "events": [ { "type": "note", "note": "C4", "start": { "bar": 1, "beat": 1 }, "duration": { "value": "1/4" } } ] } ]
-      },
-      "format": "score_dsl_v1",
-      "name": "from-dsl.mid"
-   }
-}
-```
-
-append_to_smf（末尾へScore DSLを追記）:
-```jsonc
-{ 
-   "tool": "append_to_smf",
-   "arguments": {
-      "fileId": "<existing-fileId>",
-      "json": { "ppq": 480, "meta": { "timeSignature": { "numerator": 4, "denominator": 4 }, "tempo": { "bpm": 120 } }, "tracks": [ { "channel": 1, "events": [ { "type": "note", "note": "G4", "start": { "bar": 1, "beat": 1 }, "duration": { "value": "1/4" } } ] } ] },
-      "format": "score_dsl_v1",
-      "atEnd": true,
-      "gapTicks": 240
-   }
-}
-```
-
-insert_sustain（CC64のON/OFFを挿入）:
-```jsonc
-{ 
-   "tool": "insert_sustain",
-   "arguments": {
-      "fileId": "<existing-fileId>",
-      "ranges": [
-         { "startTick": 0, "endTick": 720 },
-         { "startTick": 1920, "endTick": 2400, "channel": 0, "trackIndex": 1, "valueOn": 120, "valueOff": 0 }
-      ]
-   }
-}
-```
-
-insert_cc（任意CCのON/OFF相当を挿入）:
-```jsonc
-{
-   "tool": "insert_cc",
-   "arguments": {
-      "fileId": "<existing-fileId>",
-      "controller": 11,
-      "ranges": [
-         { "startTick": 0, "endTick": 480, "valueOn": 90, "valueOff": 40 }
-      ]
-   }
-}
-```
-備考:
-- `controller` は 0〜127。`channel` は 1〜16（外部）もしくは 0〜15（内部）で指定可能。
-- 仕様・挙動は概ね insert_sustain と同様（同tickでのON/OFF、値域、trackIndex継承/明示）。
- - 複数レンジや重なりレンジを与えた場合、イベントはそのまま挿入されます（レンジのマージは行いません）。ただし、完全重複の同一イベント（tick/値/チャンネル一致）は重複除去されます。
-備考:
-- 未指定時は、最初の音源トラックを自動選択し、そのトラックのチャンネル（内部0〜15）を継承します。見つからない場合は ch0 を使用。
-- `channel` は外部表記 1〜16 も受け付けます（内部 0〜15 に自動マップ）。内部表記 0〜15 の指定も可。
-- `trackIndex` を指定すると挿入先トラックを明示できます。
-- `valueOn`/`valueOff` は 0〜127 を使用（既定 127/0）。
-   - 同tickでのON/OFも可能（startTick===endTickのときは同tickに両方のイベントが入ります）。
-   - ハーフペダル等の任意値も指定可能（例: valueOn:100, valueOff:20）。
-
-play_smf（dryRun→実再生）:
-```jsonc
-{ "tool":"play_smf", "arguments": { "fileId":"<from-json_to_smf>", "dryRun": true } }
-{ "tool":"play_smf", "arguments": { "fileId":"<from-json_to_smf>", "portName":"IAC", "schedulerLookaheadMs":200, "schedulerTickMs":20 } }
-```
-
-### エンドツーエンド例（Score DSL → SMF → 追記 → CC自動/手動 → 再生）
-以下は小さなフレーズを Score DSL で作成し、SMF 化 → 末尾にフレーズ追記 → Expression カーブを自動付与（`crescendo_to_expression`）しつつ、更に任意CCで強調 → dryRun 解析 → 実再生 までの一連例です。
-
-1. 初期スコア（crescendoプリセット付き）を `json_to_smf`:
-```jsonc
-{ "tool":"json_to_smf", "arguments": {
-   "json": {
-      "ppq":480,
-      "meta": { "timeSignature": { "numerator":4,"denominator":4 }, "tempo": { "bpm":120 }, "autoCcPresets":[ { "id":"crescendo_to_expression" } ] },
-      "tracks": [ { "channel":1, "program":0, "events":[
-         { "type":"note","note":"C4","start":{"bar":1,"beat":1},"duration":{"value":"1/4"},"dynamic":"mp"},
-         { "type":"note","note":"D4","start":{"bar":1,"beat":2},"duration":{"value":"1/4"},"dynamic":"mf"},
-         { "type":"note","note":"E4","start":{"bar":1,"beat":3},"duration":{"value":"1/4"},"dynamic":"f"}
-      ] } ]
-   },
-   "format":"score_dsl_v1",
-   "name":"phrase1.mid"
-} }
-```
-2. 別フレーズを Score DSL で末尾追記 (`append_to_smf` + `atEnd:true` + `gapTicks`):
-```jsonc
-{ "tool":"append_to_smf", "arguments": {
-   "fileId":"<phrase1-fileId>",
-   "json": { "ppq":480, "meta": { "timeSignature": { "numerator":4, "denominator":4 }, "tempo": { "bpm":120 } }, "tracks":[ { "channel":1, "program":0, "events":[ { "type":"note","note":"G4","start":{"bar":1,"beat":1},"duration":{"value":"1/2"}, "dynamic":"mf" } ] } ] },
-   "format":"score_dsl_v1",
-   "atEnd":true,
-   "gapTicks":240
-} }
-```
-3. 追加で任意CC（例: CC11で軽いブースト区間 2小節目開始～2小節目終わり）を `insert_cc`:
-```jsonc
-{ "tool":"insert_cc", "arguments": {
-   "fileId":"<resulting-fileId>",
-   "controller":11,
-   "ranges":[ { "startTick": 480*4, "endTick": 480*8, "valueOn":100, "valueOff":70 } ]
-} }
-```
-4. 安全確認 （dryRun解析）:
-```jsonc
-{ "tool":"play_smf", "arguments": { "fileId":"<file-after-cc>", "dryRun": true } }
-```
-    - `scheduledEvents` と `totalDurationMs` を確認し過剰イベントでないか判断。
-5. 実再生:
-```jsonc
-{ "tool":"play_smf", "arguments": { "fileId":"<file-after-cc>", "portName":"IAC" } }
-```
-6. 進捗監視と停止:
-```jsonc
-{ "tool":"get_playback_status", "arguments": { "playbackId":"<id>" } }
-{ "tool":"stop_playback", "arguments": { "playbackId":"<id>" } }
-```
-ポイント:
-- 自動付与 (autoCcPresets) と手動挿入 (insert_cc) を組み合わせて段階＋滑らかな変化を作れる。
-- 大編成/長尺ではこの手順を小刻みに繰り返し、常に `dryRun` でメトリクスを把握してから再生。
-
-
-## ディレクトリ
-- `src/` MCPサーバ本体（stdio）
-- `dist/` ビルド出力
-- `data/midi`, `data/export` ストレージ/エクスポート先
-- `docs/` セットアップ、プロンプト、スニペット、ADR/仕様
-
-## セットアップ
-1) 依存インストール
-   - `npm install`
-2) ビルド
-   - `npm run build`
-3) 実行（MCPクライアントから）
-   - Claude Desktop でこのサーバのエントリ（`node dist/index.js`）を登録してください。
-
-補足:
-- 環境変数`MCP_MIDI_MANIFEST`でマニフェストパスを上書き可能です（デフォルトはプロセスごとに`manifest.<pid>.json`）。
-
-テスト:
-- `npm test`（Vitest）でユニット/結合テスト一式が実行されます。
-
-## Claudeでの検証手順（推奨）
-- 単音スモーク＆基本操作: `docs/prompts/claude_test_prompts_v2.md`
-- SMF再生（dryRun→実再生→停止）: `docs/prompts/claude_test_prompts_v3_play_smf.md`
-- 8秒の継続音SMFでE2E検証: `docs/prompts/claude_test_prompts_v4_continuous_8s.md`
-- ネットDL→Bach 3声インベンション実再生: `docs/prompts/claude_test_prompts_v5_bach_3voice_net.md`
-- 8秒SMFの生成スニペット: `docs/snippets/continuous_chords_smf_8s.md`
-
-最短確認（例）:
-1) list_devices で出力ポート確認（IAC/Network/Virtual推奨）
-2) store_midi でSMF保存→fileId取得
-3) play_smf { fileId, dryRun:true } で scheduledEvents / totalDurationMs を確認
-4) play_smf { fileId, portName:"IAC" } で実再生
-5) get_playback_status で cursor/lastSentAt/done を観測 → stop_playback
-
-## スケジューラの調整
-- play_smf はルックアヘッド型で送出します。必要に応じて以下で調整可能:
-  - `schedulerLookaheadMs`（既定50、10〜1000）
-  - `schedulerTickMs`（既定10、5〜200）
-
-例: `{ fileId, portName:"IAC", schedulerLookaheadMs:200, schedulerTickMs:20 }`
-
-観測ポイント（dryRun/実再生）:
-- totalDurationMs: SMF全体の総尺
-- scheduledEvents: dryRunで解析されたイベント件数
-- cursorMs/lastSentAt/done: 再生中の進捗確認用
-
-## 受信側（音が出ない時）
-- macOSの例: `docs/setup/macos_coremidi_receiver.md`
-- チェックリスト: `docs/checklists/receiver_setup_checklist.md`
-- 確認ポイント: トラック入力 / モニタリング / 音源割当 / MIDIチャンネル（通常は ch1。内部値では 0）
-
-## クロスプラットフォーム
-- 目標: macOS(CoreMIDI) / Windows(MME) / Linux(ALSA)
-- 依存: node-midi のネイティブビルドに依存（OS/Nodeバージョン注意）
-- ADR: `docs/adr/ADR-0001-node-midi-adoption.md`
-   - 追加: `docs/adr/ADR-0002-json-first-composition.md`
-
-## 開発
-- TDDで進行。Vitestなどでユニット/結合テスト（`npm test`）
-- コード: `src/index.ts`, `src/storage.ts`
-- 仕様/バックログ: `docs/specs/*`, `BACKLOG.md`
-
-### 変換メトリクス（観測可能性）
-- json_to_smf / smf_to_json は以下を返します:
-   - `bytes`: 入出力SMFのバイトサイズ
-   - `trackCount`: トラック数
-   - `eventCount`: イベント総数（解析/生成時点）
-これらはクライアント側のログやガードレール（過大サイズ回避）に活用できます。
-
-## 既知の制限/注意
-### 構造化エラーコード（MCPレスポンス）
-全ツールは失敗時に `ok:false` と以下のような構造化エラーを返します:
+## ready ペイロード構造 (オプトイン時 `MCP_MIDI_EMIT_READY=1`)
 ```json
 {
-   "ok": false,
-   "error": {
-      "tool": "json_to_smf",
-      "code": "VALIDATION_ERROR",
-      "message": "score_dsl_v1 compile/validation failed: ...",
-      "hint": "入力JSON/Score DSL のスキーマを README と docs/specs を参照して修正してください (format指定推奨)",
-      "issues": [ { "path": ["tracks",0,"events",1,"pitch"], "message": "Expected number" } ]
-   }
+  "ready": true,
+  "coldStartMs": 123,
+  "warmup": {
+    "manifest": { "count": 1234, "ms": 45 },
+    "schema": { "compiled": true, "ms": 12 },
+    "midi": { "dynamicImport": true }
+  },
+  "manifestCache": { "path": "data/manifest.XXXXX.json", "exists": true },
+  "manifestItemsThresholdExceeded": false,
+  "manifestThreshold": 5000
 }
 ```
-コード一覧:
-- MISSING_PARAMETER: 必須パラメータ欠如
-- NOT_FOUND: fileId 等が存在しない
-- VALIDATION_ERROR: スキーマ検証/コンパイル失敗（Zod issues 付随可）
-- INPUT_FORMAT_ERROR: 音名/JSON構造等の軽度フォーマット不正
-- LIMIT_EXCEEDED: サイズ上限超過等
-- DEVICE_UNAVAILABLE: node-midi 等デバイス未利用可能
-- INTERNAL_ERROR: 想定外例外（Stackはログにのみ出力推奨）
-（single capture 補足: reason は 'completed' か 'timeout' の2値。timeout は maxWaitMs 超過発生）
 
-クライアント実装指針:
-1. ok===false → error.code で分岐
-2. hint があればユーザ提示
-3. issues があればパス単位で再生成プロンプトへ投入
-4. VALIDATION_ERROR かつ format 未指定の場合は次回 format 明示
+### フィールド解説
+- `manifestItemsThresholdExceeded`: マニフェスト件数 >= 閾値で true。
+- `manifestThreshold`: 判定に利用した閾値値。
+- `coldStartMs`: プロセス開始から ready 出力までのおおよその経過ミリ秒。
+- `warmup.manifest.count`: 読み込んだアイテム数。
+- `warmup.manifest.ms`: マニフェスト読込所要時間。
+- `warmup.schema.ms`: スキーマ初期化所要時間。
+- `manifestCache.path`: 利用されたマニフェストキャッシュファイルパス。
 
-### Score DSL / JSON MIDI のエラーの読み方（format導入後）
-- `format` を指定した場合:
-   - `format: "json_midi_v1"` では `json_midi_v1 validation failed: ...` の形でZodの検証エラーが返ります。
-   - `format: "score_dsl_v1"` では `score_dsl_v1 compile/validation failed: ...` の形でコンパイル/検証エラーが返ります。
-- `format` 未指定の場合（後方互換）:
-   - まず JSON MIDI v1 として検証し、失敗時は Score DSL v1 のコンパイルを試みます。
-   - その場合のメッセージは `json validation failed (or score compile failed): ... | score-compile: ...` のように連結されます。
-- Score DSLの値（特に NotationValue）は `"1" | "1/2" | "1/4" | "1/8" | "1/16" | "1/32"` を使用してください（`"1/1"`は無効）。
-- 大容量SMFはdryRunで件数や総尺を把握し、範囲再生（startMs/stopMs）を推奨
-- 早期停止が見える場合は`get_playback_status`で進捗を確認し、スケジューラの窓/tickを調整
-- `stop_playback`は全ノート消音とポートクローズを行います（ハングノート対策）
+## WARN ログ
+閾値を超えると stderr に以下形式の警告が出力されます:
+```
+[WARN] manifest item count high: <count> >= <threshold>
+```
 
-## ラウンドトリップ保証範囲（JSON⇄SMF）
-- ✅ 往復検証済み（テストGREEN）
-   - note / cc / pitchBend / program
-   - meta.tempo / meta.timeSignature / meta.marker / meta.trackName
-- 🔄 片方向対応
-   - meta.keySignature（エンコード可／デコードは今後対応予定）
-- ⭐ 実装予定（スキーマ定義済み）
-   - aftertouch.channel / aftertouch.poly
-
-## メトリクスの読み方（実務ガイド）
-- bytes
-   - ファイルサイズの概観。大きいほど読み込み・送出コスト増。数MB級はdryRunで絞り込み（startMs/stopMs）を検討。
-- trackCount
-   - トラックが多いほど並行イベントが増えがち。不要トラックは削除、役割が同じなら統合を検討。
-- eventCount
-   - スケジューラ負荷の目安。多い場合は`schedulerLookaheadMs`拡大・`schedulerTickMs`調整で安定化。
-- scheduledEvents（play_smf: dryRun）
-   - 実送出前の見積り。想定より多い場合はクオンタイズ/ベロシティの簡略化やCC間引きを検討。
-- totalDurationMs
-   - 再生時間の総尺。長尺では区間再生と進捗監視（get_playback_status）を併用。
-
-ヒント:
-- 初回は `dryRun:true` で scheduledEvents/totalDurationMs を把握 → 実再生へ
-- カクつき時は lookahead を広げ、tick をやや大きく（例: 200ms/20ms）
-- 受信側の負荷や内部モニタリングの有無も体感に影響します（DAWのメータ/可視化を一時オフに）
-
-## FAQ / トラブルシューティング
-### trigger_notes のチャンネル指定について
-`trigger_notes` の `channel` は外部表記 1〜16 を指定してください。
-- 内部では 0〜15 に変換して送出します（例: 指定 10 → 内部 9 → status byte 下位 nibble 9）。
-- 旧バージョン互換: 0〜15 を直接指定した場合は警告を返しつつ外部 (内部+1) として扱います。今後は 1〜16 の使用を推奨。
-- dryRun 戻り値: `channel`（外部）, `internalChannel`（内部0-15）, `warnings`（互換使用時） を含みます。
-
-- node-midiのビルドに失敗します
-   - Node.jsとOSの対応ビルドが必要です。Node 20+を推奨。再ビルド: `npm rebuild midi`。CI環境では`node-gyp`等のビルドツールが必要です。
-- 出力ポートが見つかりません
-   - `list_devices`でポート名を確認し、`portName`に部分一致/正確な名称を指定。macOSではIAC Driverを有効化してください。
-- 再生しても音が出ません
-   - 受信アプリ/音源のMIDIインプット接続、チャンネル（デフォルトは ch1。内部値では 0）、音源割当、モニタリングを確認。まず`dryRun:true`でイベント検出を確認。
-- 再生がカクつく/遅延します
-   - `schedulerLookaheadMs`を広げ、`schedulerTickMs`をやや大きく。CPU負荷が高いとタイマ精度が落ちるため、他の重い処理を避けて検証。
-- ハングノートが発生します
-   - `stop_playback`で全ノートオフを送出。発生原因として範囲再生の途中停止や受信側の処理落ちが考えられます。
-
-## ライセンス
-- 本プロジェクトは MIT License です。詳細はルートの `LICENSE` をご確認ください。
+## テストにおける利用例
+特定テストで ready ペイロードを検証する場合:
+```
+MCP_MIDI_EMIT_READY=1 MCP_MIDI_MANIFEST_THRESHOLD=50 vitest run tests/manifest_threshold_ready.test.ts
+```

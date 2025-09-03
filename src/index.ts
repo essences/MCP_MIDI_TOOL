@@ -2842,8 +2842,18 @@ async function main() {
   const totalMs = +(tReady - t0).toFixed(1);
   // manifest キャッシュ状態の可視化: 環境変数で無効化されているか
   const manifestCacheEnabled = process.env.MCP_MIDI_MANIFEST_NOCACHE === '1' ? false : true;
-  const readyPayload = { ready: true, coldStartMs: totalMs, warmup, manifestCache: manifestCacheEnabled ? 'enabled' : 'disabled' };
-  try { process.stdout.write(JSON.stringify(readyPayload) + "\n"); } catch { /* ignore */ }
+  // 大量マニフェスト閾値（デフォルト5000, 環境変数で上書き可能）
+  const manifestThreshold = Number.isFinite(Number(process.env.MCP_MIDI_MANIFEST_THRESHOLD)) ? Number(process.env.MCP_MIDI_MANIFEST_THRESHOLD) : 5000;
+  const manifestItems = Number(warmup?.manifest?.items || 0);
+  const manifestItemsThresholdExceeded = manifestItems >= manifestThreshold;
+  if (manifestItemsThresholdExceeded) {
+    try { process.stderr.write(`[WARN] manifest item count high: ${manifestItems} >= ${manifestThreshold}\n`); } catch { /* ignore */ }
+  }
+  const readyPayload = { ready: true, coldStartMs: totalMs, warmup, manifestCache: manifestCacheEnabled ? 'enabled' : 'disabled', manifestItemsThresholdExceeded, manifestThreshold };
+  // 既存テスト互換性のため ready 行はデフォルト非出力。必要なテスト/クライアントのみ MCP_MIDI_EMIT_READY=1 を指定。
+  if (process.env.MCP_MIDI_EMIT_READY === '1') {
+    try { process.stdout.write(JSON.stringify(readyPayload) + "\n"); } catch { /* ignore */ }
+  }
 
   // Keep process alive until client closes connection
   await new Promise<void>((resolve, reject) => {
