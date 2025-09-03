@@ -418,6 +418,19 @@ ready シグナル出力例（起動直後 stdout 1行 JSON）:
 ```
 テスト/クライアントはこの行受信後にリクエスト送信を開始すると初回ウォームアップによるフレークを防止できます。
 
+フィールド説明:
+- `coldStartMs`: プロセス開始から ready 発行までの総時間
+- `warmup.manifest.ms`: マニフェスト読み込み処理時間（キャッシュ後は低減）
+- `warmup.manifest.items`: マニフェスト内の登録MIDI件数
+- `warmup.schema.ms`: Score DSL → JSON MIDI の最初の軽量コンパイル時間
+- `warmup.midi.ms`: node-midi 動的 import 判定時間
+- `manifestCache`: `enabled` / `disabled` （`MCP_MIDI_MANIFEST_NOCACHE=1` で disabled）
+
+大量マニフェスト警告ポリシー（将来拡張予定）:
+- 起動時 `warmup.manifest.items` が閾値（例: 5000）を超える場合、stderr に `WARN manifest item count high` を出力予定
+- 目的: 初期化遅延の可視化と CI の上限設定
+- 現状はログ未実装（テストが安定しているため）。必要になり次第 `process.stderr.write` ベースで追加。
+
 ### MCPクライアントからの呼び出し例（擬似）
 以下はMCPクライアントが送るpayloadの概略です（実際はクライアント実装に依存）。
 
