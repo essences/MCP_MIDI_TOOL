@@ -60,7 +60,7 @@ export const zTempo = z.union([
 
 export const zScoreTrack = z.object({
   name: z.string().optional(),
-  channel: z.number().int().min(0).max(15).default(0),
+  channel: z.number().int().min(1).max(16).default(1), // 外部表記1-16のみ許容、デフォルトch1
   program: z.number().int().min(0).max(127).default(0),
   events: z.array(zScoreEvent),
 });

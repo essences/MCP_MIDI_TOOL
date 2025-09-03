@@ -120,7 +120,10 @@ export function compileScoreToJsonMidi(input: unknown): JsonMidiSong {
   for (const st of parsed.tracks) {
     const t: JsonMidiTrack = { name: st.name, events: [] };
     if (st.name) t.events.push({ type: "meta.trackName", tick: 0, text: st.name });
-    t.events.push({ type: "program", tick: 0, program: st.program, channel: st.channel });
+    
+    // チャンネル変換: 外部表記1-16 → 内部表記0-15
+    const internalChannel = st.channel - 1;
+    t.events.push({ type: "program", tick: 0, program: st.program, channel: internalChannel });
 
     // materialize notes
     type TmpNote = { pitch: number; startTick: number; durTicks: number; velocity: number; articulation?: string; dynamic?: string; tie?: boolean; slur?: boolean };
@@ -142,11 +145,11 @@ export function compileScoreToJsonMidi(input: unknown): JsonMidiSong {
       } else if (ev.type === "cc") {
         const tick = positionToTick(ppq, ev.at, num, den);
         if (typeof ev.cc !== "number" || typeof ev.value !== "number") continue;
-        t.events.push({ type: "cc", tick, controller: ev.cc, value: ev.value, channel: st.channel });
+        t.events.push({ type: "cc", tick, controller: ev.cc, value: ev.value, channel: internalChannel });
       } else if (ev.type === "pitchBend") {
         const tick = positionToTick(ppq, ev.at, num, den);
         if (typeof ev.bend !== "number") continue;
-        t.events.push({ type: "pitchBend", tick, value: ev.bend, channel: st.channel });
+        t.events.push({ type: "pitchBend", tick, value: ev.bend, channel: internalChannel });
       }
     }
 
@@ -182,7 +185,7 @@ export function compileScoreToJsonMidi(input: unknown): JsonMidiSong {
     }
 
     for (const n of merged) {
-      t.events.push({ type: "note", tick: n.startTick, pitch: n.pitch, velocity: n.velocity, duration: n.durTicks, channel: st.channel });
+      t.events.push({ type: "note", tick: n.startTick, pitch: n.pitch, velocity: n.velocity, duration: n.durTicks, channel: internalChannel });
     }
 
   // autoCcPresets: sustain_from_slur（slur/legatoの持続区間にCC64 on/off）
@@ -206,8 +209,8 @@ export function compileScoreToJsonMidi(input: unknown): JsonMidiSong {
       if (cur) segs.push(cur);
 
       for (const s of segs) {
-        t.events.push({ type: "cc", tick: s.start, controller: 64, value: 127, channel: st.channel });
-        t.events.push({ type: "cc", tick: s.end, controller: 64, value: 0, channel: st.channel });
+        t.events.push({ type: "cc", tick: s.start, controller: 64, value: 127, channel: internalChannel });
+        t.events.push({ type: "cc", tick: s.end, controller: 64, value: 0, channel: internalChannel });
       }
     }
 
@@ -241,7 +244,7 @@ export function compileScoreToJsonMidi(input: unknown): JsonMidiSong {
         const end = b.tick;
         const span = end - start;
         const step = Math.max(1, Math.round(ppq/4));
-        const emit = (tk: number, val: number) => t.events.push({ type: "cc", tick: tk, controller: 11, value: clamp(Math.round(val), 0, 127), channel: st.channel });
+        const emit = (tk: number, val: number) => t.events.push({ type: "cc", tick: tk, controller: 11, value: clamp(Math.round(val), 0, 127), channel: internalChannel });
         emit(start, a.value);
         for (let tk=start+step; tk<end; tk+=step) {
           const ratio = (tk - start) / span;

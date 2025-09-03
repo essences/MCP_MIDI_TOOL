@@ -8,14 +8,27 @@ export interface McpTestServer {
   shutdown: () => Promise<void>;
 }
 
-export async function spawnMcpServer(startTimeoutMs = 2000): Promise<McpTestServer> {
+export async function spawnMcpServer(startTimeoutMs = 4000): Promise<McpTestServer> {
   const child = spawn('node', [path.resolve('./dist/index.js')], { stdio: ['pipe','pipe','pipe'] });
   let ready = false;
   await new Promise<void>((resolve) => {
-    const timeout = setTimeout(resolve, startTimeoutMs);
-    child.stdout?.on('data', () => {
-      if (!ready) { ready = true; clearTimeout(timeout); resolve(); }
-    });
+    const timeout = setTimeout(() => { resolve(); }, startTimeoutMs);
+    let buffer = '';
+    const onData = (chunk: Buffer) => {
+      if (ready) return;
+      buffer += chunk.toString();
+      const lines = buffer.split('\n').filter(l => l.trim());
+      for (const line of lines) {
+        try {
+          const parsed = JSON.parse(line);
+          if (parsed && parsed.ready) {
+            ready = true; clearTimeout(timeout); child.stdout?.off('data', onData); resolve();
+            return;
+          }
+        } catch { /* ignore non JSON lines */ }
+      }
+    };
+    child.stdout?.on('data', onData);
   });
   child.stderr?.on('data', d => console.error('[server:stderr]', d.toString()));
 

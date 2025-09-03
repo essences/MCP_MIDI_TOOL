@@ -402,6 +402,22 @@ MIDI入力デバイスから演奏全体を継続的に記録し、自動また�
 - meta.marker: `{ type:"meta.marker", tick, text<=128 }`
 - meta.trackName: `{ type:"meta.trackName", tick, text<=128 }`
 
+## 環境変数 (Environment Variables)
+パフォーマンス調整や挙動切替のために以下を利用できます:
+
+| 変数名 | 目的 | 値例 | 既定 | 効果 |
+|--------|------|------|------|------|
+| `MCP_MIDI_MANIFEST` | マニフェストファイル名固定 | `manifest.shared.json` | `manifest.<pid>.json` | 並列プロセス間で共有/分離を制御 |
+| `MCP_MIDI_BASE_DIR` | data/ のベースパス変更 | `/tmp/mcp-midi` | プロジェクトルート | データ出力先の再配置 |
+| `MCP_MIDI_MANIFEST_NOCACHE` | マニフェスト読込キャッシュ無効化 | `1` | (未設定) | 毎回 fs.stat/read 実行（デバッグ/一貫性比較） |
+| `MCP_MIDI_PLAY_SMF_BAR_MODE` | 小節抽出モード強制 | `simple` / `precise` | `precise`(予定) | simple 指定で旧ロジックへフォールバック（将来実装） |
+
+ready シグナル出力例（起動直後 stdout 1行 JSON）:
+```jsonc
+{ "ready": true, "coldStartMs": 142.7, "warmup": { "manifest": {"ms":5.1,"items":12}, "schema": {"ms":18.4}, "midi": {"ms":0.4,"output":false,"input":false} }, "manifestCache": "enabled" }
+```
+テスト/クライアントはこの行受信後にリクエスト送信を開始すると初回ウォームアップによるフレークを防止できます。
+
 ### MCPクライアントからの呼び出し例（擬似）
 以下はMCPクライアントが送るpayloadの概略です（実際はクライアント実装に依存）。
 

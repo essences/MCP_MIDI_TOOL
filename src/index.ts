@@ -35,12 +35,46 @@ const inMemoryIndex = new Map<string, ItemRec>();
 
 // Minimal MCP server with tools: store_midi, get_midi, list_midi, export_midi, list_devices
 async function main() {
+  const t0 = performance.now();
+  // ウォームアップ計測用オブジェクト（初回遅延要因の可視化）
+  const warmup: any = { manifest: {}, schema: {}, midi: {} };
   const transport = new StdioServerTransport();
   const server = new Server(
     { name: "mcp-midi-tool", version: "0.1.0" },
   // prompts/resources を明示してクライアント側の探索フローと互換性を持たせる
   { capabilities: { tools: {}, prompts: {}, resources: {} } }
   );
+
+  // ---- 初回ウォームアップ処理（計測） ----
+  // 1. manifest スキャン（件数と時間）
+  {
+    const t1 = performance.now();
+    let count = 0;
+    try { count = (await readManifest()).items.length; } catch { /* ignore */ }
+    const t2 = performance.now();
+    warmup.manifest = { ms: +(t2 - t1).toFixed(1), items: count };
+  }
+  // 2. スキーマ / コンパイルパス ウォーム（極小DSLをコンパイル）
+  {
+    const t1 = performance.now();
+    try {
+      const dummyScore: any = { ppq: 480, meta: { timeSignature: { numerator: 4, denominator: 4 }, tempo: { bpm: 120 } }, tracks: [{ channel: 1, events: [] }] };
+      await compileScoreToJsonMidi(dummyScore); // 結果は捨てる
+      const t2 = performance.now();
+      warmup.schema = { ms: +(t2 - t1).toFixed(1) };
+    } catch (e: any) {
+      const t2 = performance.now();
+      warmup.schema = { ms: +(t2 - t1).toFixed(1), error: String(e?.message || e) };
+    }
+  }
+  // 3. MIDI 出力デバイス利用可否の事前判定（dynamic import の JIT コスト顕在化）
+  {
+    const t1 = performance.now();
+    let out = false; let inp = false;
+    try { const r = await loadMidi(); out = !!r.MidiOutput; inp = !!r.MidiInput; } catch { /* ignore */ }
+    const t2 = performance.now();
+    warmup.midi = { ms: +(t2 - t1).toFixed(1), output: out, input: inp };
+  }
 
   
 
@@ -2802,6 +2836,14 @@ async function main() {
   };
 
   await server.connect(transport);
+
+  // ready シグナル（JSON 1 行）: テストヘルパはこれを待機してからリクエスト送信
+  const tReady = performance.now();
+  const totalMs = +(tReady - t0).toFixed(1);
+  // manifest キャッシュ状態の可視化: 環境変数で無効化されているか
+  const manifestCacheEnabled = process.env.MCP_MIDI_MANIFEST_NOCACHE === '1' ? false : true;
+  const readyPayload = { ready: true, coldStartMs: totalMs, warmup, manifestCache: manifestCacheEnabled ? 'enabled' : 'disabled' };
+  try { process.stdout.write(JSON.stringify(readyPayload) + "\n"); } catch { /* ignore */ }
 
   // Keep process alive until client closes connection
   await new Promise<void>((resolve, reject) => {

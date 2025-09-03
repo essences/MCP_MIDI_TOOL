@@ -56,13 +56,14 @@ describe('trigger_notes channel mapping', () => {
     const child = spawnServer();
     sendLine(child, { jsonrpc:'2.0', id:1, method:'initialize', params:{ protocolVersion:'2025-06-18', capabilities:{}, clientInfo:{ name:'vitest', version:'0' } } });
     await readLine(child);
-  sendLine(child, { jsonrpc:'2.0', id:2, method:'tools/call', params:{ name:'trigger_notes', arguments:{ notes:['C4'], channel:1, dryRun:true } } });
+  // legacy 内部表記 (0-15) を明示的に与えて互換警告を検証するため channel:0 を使用
+  sendLine(child, { jsonrpc:'2.0', id:2, method:'tools/call', params:{ name:'trigger_notes', arguments:{ notes:['C4'], channel:0, dryRun:true } } });
     const res = await readLine(child);
     expect(res.error).toBeUndefined();
     const body = JSON.parse(res.result.content[0].text);
     expect(body.ok).toBe(true);
-    expect(body.channel).toBe(1);
-    expect(body.internalChannel).toBe(0);
+    expect(body.channel).toBe(1); // 外部表記へ +1 変換
+    expect(body.internalChannel).toBe(0); // 内部そのまま
     expect(Array.isArray(body.warnings) ? body.warnings.join('\n') : '').toMatch(/legacy internal/);
     child.kill();
   }, 10000);
