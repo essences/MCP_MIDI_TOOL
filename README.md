@@ -11,6 +11,11 @@ AIとの連携では、長大なBase64よりも「構造化JSON→SMFコンパ�
 - json_to_smf: JSONを検証しSMFへコンパイル・保存（bytes/trackCount/eventCount を返却）
 - smf_to_json: 既存SMFをJSONへデコンパイル（同メトリクス付き）
 
+関連ガイド: `docs/guide/composition_workflow.md` に、Score DSL/JSON MIDI を用いた「作曲→編集→再生→書き出し」までの実践フローをまとめています。
+
+クライアント接続（Codex CLI 等）
+- Codex から本サーバーを MCP として登録する手順は `docs/setup/codex_mcp_client.md` を参照してください（mcpServers 設定例とスモークテスト付き）。
+
 JSONスキーマ、正規化/順序ルールは `docs/adr/ADR-0002-json-first-composition.md` と `docs/specs/json_midi_schema_v1.md` を参照。既存のSMFワークフロー（store_midi→play_smf）もそのまま利用可能です。
 
 ### クイックフロー（JSON→SMF→再生）

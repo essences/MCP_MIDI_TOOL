@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "mcp-midi-tool": {
+      "command": "node",
+      "args": ["./dist/index.js"],
+      "env": {
+        "MCP_MIDI_EMIT_READY": "1"
+      }
+    }
+  }
+}
+
