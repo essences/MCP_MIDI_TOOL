@@ -121,6 +121,7 @@ Score DSL → JSON MIDI コンパイル時に、演奏表現を補助するCCイ
 |--------|------|------------|
 | `MCP_MIDI_MANIFEST_THRESHOLD` | マニフェスト内アイテム数の閾値。超過すると `manifestItemsThresholdExceeded` が ready ペイロードで `true` になり、stderr に WARN を出力。 | `5000` |
 | `MCP_MIDI_EMIT_READY` | `1` のときのみ起動時に ready ペイロード(JSON 1行)を stdout に出力。既存クライアントとの後方互換性維持のためデフォルト非出力。 | (未設定) |
+| `MCP_MIDI_DEVICE_FALLBACK` | `0` を設定すると `list_devices` が実デバイス未検出時にプレースホルダー(IAC有効化案内)を挿入せず空配列を返す。未設定時は macOS でデバイス0件の場合 `(placeholder) Enable IAC in Audio MIDI Setup` が `placeholder:true` 付きで返る。 | (未設定) |
 
 ## ready ペイロード構造 (オプトイン時 `MCP_MIDI_EMIT_READY=1`)
 ```json
@@ -485,8 +486,83 @@ MIDI入力デバイスから演奏全体を継続的に記録し、自動また�
 ## WARN ログ
 閾値を超えると stderr に以下形式の警告が出力されます:
 ```
+
+### list_devices のプレースホルダー挙動 & diagnostics
+macOS で CoreMIDI 出力ポートが 0 件の場合、環境変数 `MCP_MIDI_DEVICE_FALLBACK=0` を指定しない限り診断用のプレースホルダー1件を返します。また v0.1.0+ では `diagnostics` フィールドでネイティブロード状況を返し、再発防止 (原因特定) を支援します。
+
+```jsonc
+{ "ok": true, "devices": [ { "id": "placeholder-iac", "name": "(placeholder) Enable IAC in Audio MIDI Setup", "placeholder": true } ] }
+```
+
+このデバイスは実在せず、システムの「Audio MIDI 設定」で IAC ドライバ（仮想バス）を有効化する手順を促す目的です。実デバイスを有効化/接続すると次回呼び出しで実デバイスのみが列挙され、`placeholder` エントリは消えます。明示的に空配列が欲しい場合は `MCP_MIDI_DEVICE_FALLBACK=0` を設定してください。
+
+#### diagnostics フィールド例
+```jsonc
+{
+   "ok": true,
+   "devices": [ { "id": "placeholder-iac", "name": "(placeholder) Enable IAC in Audio MIDI Setup", "placeholder": true } ],
+   "diagnostics": {
+      "platform": "darwin",
+      "nativeLoadFailed": "ERR_DLOPEN_FAILED", // node-midi ロード失敗 (例)
+      "realCount": 0,
+      "placeholderInjected": true
+   }
+}
+```
+キー説明:
+- `nativeLoadFailed`: ネイティブモジュール (node-midi) のロードに失敗した場合のエラーコード/文字列。
+- `nativePortCount`: node-midi が報告した総ポート数 (ロード成功時のみ)。
+- `realCount`: 実際に列挙して追加できたデバイス件数。
+- `placeholderInjected`: プレースホルダーを追加した場合 true。
+- `placeholderSuppressed`: フォールバック無効化 (MCP_MIDI_DEVICE_FALLBACK=0) で空配列を返した場合 true。
 [WARN] manifest item count high: <count> >= <threshold>
 ```
+
+### CoreMIDI / node-midi トラブルシューティング (ERR_DLOPEN_FAILED 等)
+
+`diagnostics.nativeLoadFailed` や `nativeLoadErrorMessage` に以下のような内容が出た場合:
+
+```
+The module '.../node_modules/midi/build/Release/midi.node'
+was compiled against a different Node.js version using
+NODE_MODULE_VERSION 127. This version of Node.js requires
+NODE_MODULE_VERSION 131.
+```
+
+これは Node.js とビルド済み `midi.node` の ABI (NODE_MODULE_VERSION) が不一致でロードできない状態です。出力/入力とも列挙不能になり `placeholder` や `nativeLoadFailed` が返ります。
+
+対処手順 (macOS / bash):
+
+```bash
+# 1. 現在の Node / ABI 確認
+node -v
+node -p "process.versions.modules"
+
+# 2. クリーン再インストール
+rm -rf node_modules package-lock.json
+npm install
+
+# 3. (必要に応じ) ソースから強制再ビルド
+npm rebuild midi --build-from-source || npm rebuild midi
+
+# 4. 生成物確認
+find node_modules/midi -name 'midi.node' -exec ls -l {} \;
+
+# 5. 再列挙確認
+npm run build --silent
+node /tmp/dump_list_devices.js   # realCount>0 / placeholder無しを期待
+```
+
+依然として `ERR_DLOPEN_FAILED` が続く場合の追加チェック:
+
+| チェック | コマンド例 | 補足 |
+|----------|------------|------|
+| Rosetta で実行されていないか | `uname -m`; `arch` | arm64/ x86_64 混在は再ビルド必要 |
+| 別 Node バージョン混在 | `which node`; `ps | grep node` | nvm / volta の複数バージョン競合 |
+| キャッシュ残存 | `npm cache verify` | 破損なら `npm cache clean --force` |
+
+CI / 非macOS 環境では CoreMIDI が無いので実デバイス 0 件は正常です。
+
 
 ## テストにおける利用例
 特定テストで ready ペイロードを検証する場合:

@@ -12,19 +12,20 @@ import { compileScoreToJsonMidi } from "./scoreToJsonMidi.js";
 // node-midi (Input/Output) を遅延ロード（CI/環境未対応時は null を許容）
 let MidiOutput: any = null;
 let MidiInput: any = null;
+let lastMidiLoadError: any = null; // ネイティブ import 失敗内容を保持（後段 diagnostics で可視化）
 async function loadMidi() {
-  if (MidiOutput || MidiInput) return { MidiOutput, MidiInput };
+  if (MidiOutput || MidiInput) return { MidiOutput, MidiInput, error: lastMidiLoadError };
   try {
     const mod: any = await import('midi');
-    // ESM/CJS どちらの形でもクラス解決
     const Out = mod?.Output || mod?.default?.Output;
     const In = mod?.Input || mod?.default?.Input;
     MidiOutput = typeof Out === 'function' ? Out : null;
     MidiInput = typeof In === 'function' ? In : null;
-  } catch {
-    MidiOutput = null; MidiInput = null;
+    lastMidiLoadError = null;
+  } catch (e: any) {
+    MidiOutput = null; MidiInput = null; lastMidiLoadError = e;
   }
-  return { MidiOutput, MidiInput };
+  return { MidiOutput, MidiInput, error: lastMidiLoadError };
 }
 
 // 同一プロセス内の直近保存レコードのインメモリ索引（テストの並列実行耐性向上のため）
@@ -1014,7 +1015,7 @@ async function main() {
       entries.sort((a,b)=> a.note - b.note);
       const notes = entries.map(e=> e.note);
       const velocities = entries.map(e=> e.velocity);
-      const startRel = st.originMs !== undefined ? (st.originMs - st.startedAt) : 0;
+           const startRel = st.originMs !== undefined ? (st.originMs - st.startedAt) : 0;
       const durationMs = endRel - (st.originMs !== undefined ? (st.originMs - st.startedAt) : 0);
       st.result = { notes, velocities, durationMs: Math.max(0,durationMs), isChord: notes.length > 1 };
     }
@@ -1057,18 +1058,29 @@ async function main() {
 
     // --- MIDI入力デバイス列挙 ---
     if (name === 'list_input_devices') {
-      await loadMidi();
-      if (!MidiInput) throw new Error('node-midi not available for input');
-      const inp = new MidiInput();
-      const count = typeof inp.getPortCount === 'function' ? inp.getPortCount() : 0;
-      const devices: Array<{ index: number; name: string }> = [];
-      for (let i=0;i<count;i++) {
-        let nm = '';
-        try { nm = inp.getPortName(i) || `input:${i}`; } catch { nm = `input:${i}`; }
-        devices.push({ index:i, name: nm });
+      const diagnostics: any = { platform: process.platform };
+      try {
+        const r = await loadMidi();
+        if (!MidiInput) {
+          diagnostics.nativeLoadFailed = r.error ? (r.error.code || r.error.message || 'unknown') : 'MidiInputClassUnavailable';
+          return wrap({ ok: true, devices: [], diagnostics }) as any;
+        }
+        const inp = new MidiInput();
+        const count = typeof inp.getPortCount === 'function' ? inp.getPortCount() : 0;
+        diagnostics.nativePortCount = count;
+        const devices: Array<{ index: number; name: string }> = [];
+        for (let i=0;i<count;i++) {
+          let nm = '';
+          try { nm = inp.getPortName(i) || `input:${i}`; } catch (e:any) { nm = `input:${i}`; diagnostics.lastEnumerateError = String(e?.message||e); }
+          devices.push({ index:i, name: nm });
+        }
+        diagnostics.realCount = devices.length;
+        try { if (typeof inp.closePort === 'function') inp.closePort(); } catch {}
+        return wrap({ ok: true, devices, diagnostics }) as any;
+      } catch (e:any) {
+        diagnostics.unhandledError = String(e?.message||e);
+        return wrap({ ok: false, error: { tool: 'list_input_devices', message: diagnostics.unhandledError }, diagnostics }) as any;
       }
-      try { if (typeof inp.closePort === 'function') inp.closePort(); } catch {}
-      return wrap({ ok: true, devices }) as any;
     }
 
     // --- デバイスからの単発キャプチャ開始 ---
@@ -1964,6 +1976,7 @@ async function main() {
         }).sort((a:any,b:any)=> (a.tick|0)-(b.tick|0));
       }
 
+      // 再エンコードして保存（上書き）
       const bin = encodeToSmfBinary(json);
       const data = Buffer.from(bin.buffer, bin.byteOffset, bin.byteLength);
       const midiDir = resolveMidiDir();
@@ -1974,6 +1987,7 @@ async function main() {
       const relPath = path.relative(base, absOut);
       const bytes = data.byteLength;
 
+      // マニフェスト更新
       const manifest = await readManifest();
       const rec = manifest.items.find(i=> i.id === item!.id);
       if (rec) { rec.bytes = bytes; rec.path = relPath; }
@@ -2402,55 +2416,64 @@ async function main() {
         }
         // ソート: 時刻昇順、同時刻は NoteOff を先に
         events.sort((a,b)=> a.tMs - b.tMs || (a.kind==='off'? -1: 1));
-        // 範囲クリップ: 1) ms指定 2) 小節指定 (simple モードのみ)
+        // 範囲クリップ: 1) ms指定 2) 小節指定(simple) 3) 精密バー抽出は前段で処理済み
         if (startMs !== undefined || stopMs !== undefined) {
-          const s = startMs ?? 0;
-          const e = stopMs ?? Number.POSITIVE_INFINITY;
-          events = events.filter(ev => ev.tMs >= s && ev.tMs <= e);
+          const startBoundaryMs = startMs ?? 0;
+          const endBoundaryMs = stopMs ?? Number.POSITIVE_INFINITY;
+          events = events.filter(ev => ev.tMs >= startBoundaryMs && ev.tMs <= endBoundaryMs);
           // クリップにより NoteOn が残り NoteOff が失われるケースに対応: 欠落Offを合成
-          const lastBoundary = Number.isFinite(e) ? e : (events.length ? events[events.length-1]!.tMs : s);
+          const lastBoundary = Number.isFinite(endBoundaryMs) ? endBoundaryMs : (events.length ? events[events.length-1]!.tMs : startBoundaryMs);
           const onMap = new Map<string, Ev>();
           const synthOff: Ev[] = [];
           for (const ev of events) {
             const key = `${ev.ch}:${ev.n}`;
-            if (ev.kind === 'on') onMap.set(key, ev);
-            else onMap.delete(key);
+            if (ev.kind === 'on') onMap.set(key, ev); else onMap.delete(key);
           }
-          for (const [key, onEv] of onMap) {
+          for (const [, onEv] of onMap) {
             synthOff.push({ tMs: Math.max(onEv.tMs + 5, lastBoundary), kind: 'off', ch: onEv.ch, n: onEv.n, v: 0 });
           }
           if (synthOff.length) {
             events.push(...synthOff);
             events.sort((a,b)=> a.tMs - b.tMs || (a.kind==='off'? -1: 1));
           }
-  } else if ((startBar !== undefined || endBar !== undefined) && extractionMode==='simple') {
-          // simple モード（互換フォールバック）
-          let bpm = 120;
-          if (midi.header?.tempos?.length) bpm = midi.header.tempos[0].bpm || bpm;
-          let numerator = 4, denominator = 4;
-          if (midi.header?.timeSignatures?.length) {
-            const ts = midi.header.timeSignatures[0].timeSignature || [4,4];
-            numerator = ts[0] || 4; denominator = ts[1] || 4;
-          }
-          const quarterMs = 60000 / bpm;
-          const barMs = quarterMs * numerator * (4 / denominator);
+          warnings.push(`bar-range applied (startBar=${startBar ?? ''}, endBar=${endBar ?? ''}) tempo/timeSig simplified`);
+        } else if (extractionMode === 'simple' && (startBar !== undefined || endBar !== undefined)) {
+          // シンプルバー指定: 単一テンポ/拍子前提で ms に変換してクリップ
           const sBar = startBar ?? 1;
-          const eBar = endBar ?? Number.MAX_SAFE_INTEGER;
-          const sMs = (sBar - 1) * barMs;
-          const eMs = eBar * barMs;
-          events = events.filter(ev => ev.tMs >= sMs && ev.tMs <= eMs);
-          const lastBoundary = Number.isFinite(eMs) ? eMs : (events.length ? events[events.length-1]!.tMs : sMs);
-          const onMap = new Map<string, Ev>();
+            const eBar = endBar ?? sBar;
+            const header: any = (midi as any).header || {};
+            const ppqSimple = header.ppq || 480;
+            // timeSignatures[0] 形式 (tonejs/midi) or fallback 4/4
+            let num = 4, den = 4;
+            try {
+              if (Array.isArray(header.timeSignatures) && header.timeSignatures.length) {
+                const ts0: any = header.timeSignatures[0];
+                if (Array.isArray(ts0.timeSignature)) { num = ts0.timeSignature[0] || 4; den = ts0.timeSignature[1] || 4; }
+                else if (typeof ts0.numerator === 'number' && typeof ts0.denominator === 'number') { num = ts0.numerator; den = ts0.denominator; }
+              }
+            } catch { /* fallback 4/4 */ }
+            const bpm = (Array.isArray(header.tempos) && header.tempos[0]?.bpm) ? header.tempos[0].bpm : 120;
+            const ticksPerBar = ppqSimple * num * (4/den);
+            const msPerTick = (60 / bpm * 1000) / ppqSimple;
+            const startBoundaryMs = (sBar - 1) * ticksPerBar * msPerTick;
+            const endBoundaryMs = (eBar) * ticksPerBar * msPerTick; // exclusive end bar
+            let clipped = events.filter(ev => ev.tMs >= startBoundaryMs && ev.tMs < endBoundaryMs);
+            // 欠落Off補完 (endBoundaryMs を境界)
+            const onMap = new Map<string, Ev>();
             const synthOff: Ev[] = [];
-            for (const ev of events) {
+            for (const ev of clipped) {
               const key = `${ev.ch}:${ev.n}`;
               if (ev.kind === 'on') onMap.set(key, ev); else onMap.delete(key);
             }
-            for (const [key, onEv] of onMap) {
-              synthOff.push({ tMs: Math.max(onEv.tMs + 5, lastBoundary), kind: 'off', ch: onEv.ch, n: onEv.n, v: 0 });
+            for (const [, onEv] of onMap) {
+              synthOff.push({ tMs: Math.max(onEv.tMs + 5, endBoundaryMs), kind: 'off', ch: onEv.ch, n: onEv.n, v: 0 });
             }
-            if (synthOff.length) { events.push(...synthOff); events.sort((a,b)=> a.tMs - b.tMs || (a.kind==='off'? -1: 1)); }
-          warnings.push(`bar-range applied (startBar=${startBar ?? ''}, endBar=${endBar ?? ''}) tempo/timeSig simplified`);
+            if (synthOff.length) {
+              clipped.push(...synthOff);
+              clipped.sort((a,b)=> a.tMs - b.tMs || (a.kind==='off'? -1: 1));
+            }
+            events = clipped;
+            warnings.push(`bar-range simple applied (startBar=${sBar}, endBar=${eBar})`);
         }
         scheduledEvents = events.length;
         if (events.length > 0) {
@@ -2499,19 +2522,25 @@ async function main() {
         const { MidiOutput: OutCls } = await loadMidi();
         if (OutCls) {
           const out = new OutCls();
-          const ports = out.getPortCount?.() ?? 0;
+          const ports = out.getPortCount();
+          // ポート選択: 指定があれば部分一致（大文字小文字無視）、無ければIAC/Network/Virtual優先、無ければ0
           let target = 0;
-          const pickByHint = (o:any, hint:string) => {
-            for (let i=0;i<ports;i++){ try{ const nm=o.getPortName(i); if (String(nm).toLowerCase().includes(hint)) return i; }catch{} }
+          const pickByHint = (hint: string) => {
+            for (let i = 0; i < ports; i++) {
+              try {
+                const name = out.getPortName(i);
+                if (String(name).toLowerCase().includes(hint)) return i;
+              } catch {}
+            }
             return -1;
           };
       if (typeof args?.portName === 'string' && args.portName.length>0) {
-            const wanted = pickByHint(out, String(args.portName).toLowerCase());
-            if (wanted>=0) target = wanted;
+            const wanted = pickByHint(String(args.portName).toLowerCase());
+            if (wanted >= 0) target = wanted;
           } else {
-            const pref = pickByHint(out, 'iac');
-            const net = pref < 0 ? pickByHint(out, 'network') : pref;
-            const vir = net < 0 ? pickByHint(out, 'virtual') : net;
+            const pref = pickByHint('iac');
+            const net = pref < 0 ? pickByHint('network') : pref;
+            const vir = net < 0 ? pickByHint('virtual') : net;
             if (vir >= 0) target = vir;
           }
           out.openPort(target);
@@ -2669,27 +2698,49 @@ async function main() {
 
     // list_devices: CoreMIDI output devices (macOS only)
     if (name === "list_devices") {
-      const devices: Array<{ id: string; name: string }> = [];
+      const devices: Array<{ id: string; name: string; placeholder?: boolean }> = [];
+      const diagnostics: any = { platform: process.platform };
       if (process.platform === "darwin") {
+        let realCount = 0;
+        let nativeLoadFailed: string | undefined;
         try {
           const { MidiOutput: OutCls } = await loadMidi();
           if (OutCls) {
             const out = new OutCls();
             const count = typeof out.getPortCount === "function" ? out.getPortCount() : 0;
+            diagnostics.nativePortCount = count;
             for (let i = 0; i < count; i++) {
               try {
                 const n = out.getPortName(i);
                 devices.push({ id: String(i), name: String(n) });
-              } catch {}
+                realCount++;
+              } catch (e: any) {
+                diagnostics.lastEnumerateError = String(e?.message || e);
+              }
             }
+          } else {
+            nativeLoadFailed = 'MidiOutputClassUnavailable';
           }
-        } catch {}
-        // フォールバック（少なくとも1つ返す）
-        if (devices.length === 0) {
-          devices.push({ id: "iac-bus-1", name: "IAC Driver Bus 1" });
+        } catch (e: any) {
+          nativeLoadFailed = String(e?.code || e?.message || 'unknown');
+        }
+        if (nativeLoadFailed) {
+          diagnostics.nativeLoadFailed = nativeLoadFailed;
+          if (lastMidiLoadError) {
+            const msg = String(lastMidiLoadError?.message || lastMidiLoadError);
+            if (msg && !diagnostics.nativeLoadErrorMessage) diagnostics.nativeLoadErrorMessage = msg.slice(0,400);
+          }
+        }
+        diagnostics.realCount = realCount;
+        const disableFallback = process.env.MCP_MIDI_DEVICE_FALLBACK === '0';
+        if (devices.length === 0 && !disableFallback) {
+          devices.push({ id: "placeholder-iac", name: "(placeholder) Enable IAC in Audio MIDI Setup", placeholder: true });
+          diagnostics.placeholderInjected = true;
+        } else if (devices.length === 0 && disableFallback) {
+          diagnostics.placeholderSuppressed = true;
         }
       }
-      return wrap({ ok: true, devices }) as any;
+      return wrap({ ok: true, devices, diagnostics }) as any;
     }
 
     // playback_midi: start MIDI playback (stubbed)
