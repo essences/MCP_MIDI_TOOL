@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "ppq": 480,
+  "tracks": [
+    {
+      "events": [
+        { "type": "meta.tempo", "tick": 0, "usPerQuarter": 500000 },
+        { "type": "meta.timeSignature", "tick": 0, "numerator": 4, "denominator": 4 }
+      ]
+    },
+    {
+      "channel": 0,
+      "events": [
+        { "type": "program", "tick": 0, "program": 0 },
+        { "type": "note", "tick": 0, "pitch": 60, "velocity": 100, "duration": 240 },
+        { "type": "note", "tick": 480, "pitch": 64, "velocity": 100, "duration": 240 },
+        { "type": "note", "tick": 960, "pitch": 67, "velocity": 100, "duration": 240 },
+        { "type": "note", "tick": 1440, "pitch": 72, "velocity": 100, "duration": 240 }
+      ]
+    }
+  ]
+}

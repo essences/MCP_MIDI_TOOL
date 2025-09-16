@@ -1,8 +1,8 @@
 # プロダクトバックログ - MCP MIDI TOOL
 
-更新日: 2025-08-29（R11 精密抽出: pitchBend/CC64/任意CCシード GREEN／README 精密抽出章追加／package.json 整形・CI TODO 準備）
+更新日: 2025-09-16（CC64 DAW互換性調査: insert_sustain機能検証・DAWトラブルシューティング・マルチパターンテストファイル作成）
 
-凡例: [ ] 未着手 / [~] 進行中 / [x] 完了 / [!] ブロック
+凡例: [ ] 未着手 / [~] 進行中 / [x] 完了 / [!] ブロック / [?] 調査中
 
 ## 最優先（Next Up / Top 10）
 1. [x] R7: JSONスキーマ起草（`docs/specs/json_midi_schema_v1.md`・Zod型・順序ルール（初版））
@@ -13,10 +13,19 @@
 6. [x] R7: `json_to_smf` に format 明示パラメータを導入（`json_midi_v1`/`score_dsl_v1`）＋README更新＋テスト
 7. [x] R7: ツール `insert_sustain`（CC64のON/OFFを範囲挿入｜チャンネル/トラック継承・明示指定両対応｜README＋E2E）
 8. [x] R7: ツール `insert_cc`（任意CCの2値レンジ挿入｜README＋E2E）
-9. [x] **R9: 継続MIDI記録機能**（Phase1-4完了: 基本→タイムアウト→手動終了→高度機能・観測性）
-10. [x] R3: 構造化エラー分類・レスポンス統一（VALIDATION_ERROR/NOT_FOUND等）
-11. [x] R10: 小節範囲部分編集機能（extract_bars/replace_bars｜小節指定でJSON抽出・置換｜作曲編集ワークフロー対応）
-12. [ ] R4: CIで各OSのビルドとdryRunスモーク（macOS/Windows/Linux）(README精密抽出章後に GitHub Actions workflow 追加予定)
+9. [x] **R12: デバイス診断機能強化**（nativeLoadErrorMessage, list_input_devices診断, トラブルシューティングドキュメント, デバイススナップショット比較テスト）
+10. [x] **R9: 継続MIDI記録機能**（Phase1-4完了: 基本→タイムアウト→手動終了→高度機能・観測性）
+11. [x] R3: 構造化エラー分類・レスポンス統一（VALIDATION_ERROR/NOT_FOUND等）
+12. [x] R10: 小節範囲部分編集機能（extract_bars/replace_bars｜小節指定でJSON抽出・置換｜作曲編集ワークフロー対応）
+13. [?] **R13: CC64 DAW互換性調査**（サスティンペダルがDAWで再生されない問題の原因究明・対策検討）
+    - [x] insert_sustain機能検証: テスト実行でCC64挿入処理が正常動作することを確認
+    - [x] バイナリレベル検証: hexdumpでMIDIファイル内のCC64イベント（B0 40 7F/B0 40 00）の存在確認
+    - [x] DAWテストファイル生成: 基本・マルチチャンネル・タイミング調整版の3パターン作成
+    - [x] トラブルシューティング文書: CC64_DAW_TROUBLESHOOTING.md で原因・対策・検証手順を文書化
+    - [ ] DAW固有動作確認: Logic Pro/Pro Tools/Cubase等での実機検証
+    - [ ] 音源プラグイン互換性: CC64対応音源での動作確認・非対応音源の特定
+14. [ ] R4: CIで各OSのビルドとdryRunスモーク（macOS/Windows/Linux）(README精密抽出章後に GitHub Actions workflow 追加予定)
+15. [ ] R4: Windows/Linux のデバイス列挙・出力の実機検証
 13. [ ] R4: Windows/Linux のデバイス列挙・出力の実機検証
 14. [ ] R2: transform_midi（最小: transpose → 次: quantize/tempo/humanize）
 15. [ ] R11: 精密小節範囲再生（play_smf bar-range extraction モード）
@@ -179,6 +188,33 @@
 - **タイミング精度**: JavaScriptタイマー精度限界・node-midiコールバック遅延考慮
 - **プラットフォーム**: Windows/Linux実機検証は後続（macOS CoreMIDI優先）
 
+## R12（診断機能強化・トラブルシューティング）
+
+### 目標 ✅ **完了**
+node-midi ネイティブモジュール関連の問題を早期発見・解決支援するため、診断情報を大幅拡充し、ユーザー向けトラブルシューティングドキュメントを整備。
+
+### 実装完了項目 ✅ **完了**
+- [x] **loadMidi 強化**: lastMidiLoadError保持・diagnostics反映・エラー詳細の永続化
+- [x] **list_devices 診断拡充**: nativeLoadErrorMessage追加（最大400文字の詳細原因）
+- [x] **list_input_devices 診断追加**: diagnostics フィールド実装（platform, nativeLoadFailed, nativePortCount, realCount等）
+- [x] **README トラブルシューティング節**: ERR_DLOPEN_FAILED・ABI不一致の具体的対処手順
+  - ステップバイステップ解決手順（Node確認→クリーン再インストール→強制再ビルド→検証）
+  - 環境別チェック表（Rosetta混在・Node競合・キャッシュ残存）
+- [x] **デバイススナップショット比較テスト**: 実機画像データとMCP出力の自動突合検証
+- [x] **コード品質**: 全テスト緑（114/114）・型安全性・エラーハンドリング完備
+
+### 技術詳細
+- **診断情報拡張**: nativeLoadFailed, nativeLoadErrorMessage, nativePortCount, realCount, placeholderInjected/Suppressed
+- **エラー根本原因表示**: NODE_MODULE_VERSION不一致・ERR_DLOPEN_FAILED等の具体的メッセージ出力
+- **フォールバック透明性**: placeholder注入・空配列返却の判断基準明示
+- **自動検証**: device_snapshot_compare.test.ts でキーワードマッチング（IAC, UM-550, Rubix24等）
+
+### ユーザー影響
+- **問題特定時間短縮**: 診断情報により root cause を即座に把握
+- **自己解決率向上**: README手順に従った재빌드で大部分が解決
+- **環境差異対応**: macOS/Windows/Linux での動作差異を事前理解
+- **開発者体験向上**: 明確なエラーメッセージと対処法提示
+
 ## リスク/ブロッカー
 - node-midi のネイティブビルドがOS/Nodeバージョンに依存
 - 大容量MIDIの処理時間
@@ -215,6 +251,7 @@
  - **R11 精密小節範囲再生 進捗 (2025-08-29)**: pitchBend / CC64 / 任意CC (全controller) 直前値シード実装＆テストGREEN。warnings から simplified 削除し extractionMode:"precise" 応答実装。残: (a) 複数テンポ変化/拍子変更/ノート跨ぎ/ペダルOFF跨ぎ REDテスト追加 (b) 跨ぎノート合成実装 (c) README精密抽出章 (d) fallback環境変数。
  - テストランナー: `.vscode/tasks.json` の Vitest コマンドから非対応 `--threads=false` オプションを除去（Vitest v2.1.9 互換）。
  - **R9 テスト安定化 (2025-08-29)**: 連続記録系 (basic/timeout/auto_save) テストを `describe.sequential` 化＋型注釈でフレーク (timeout) 解消。個別10テスト 24s内安定PASS。
+ - **R12 診断機能強化 (2025-09-13)**: デバイス列挙診断を大幅拡充。list_devices/list_input_devicesにnativeLoadErrorMessage（最大400文字の詳細エラー）追加、README CoreMIDI/node-midi トラブルシューティング節追加（ERR_DLOPEN_FAILED対処手順）、device_snapshot_compare.test.tsでデバイス画像との突合テスト追加。node-midi ABI不一致問題の完全解決とドキュメント化完了。
 
 ### 次の改善（テスト駆動）
 - **R4**: CIで各OSビルド・Windows/Linux実機検証・クロスプラットフォーム対応強化

@@ -8,7 +8,13 @@
 
 ## JSONファースト（作曲/編集フロー）
 AIとの連携では、長大なBase64よりも「構造化JSON→SMFコンパイル」の方が堅牢で反復編集に適します（ADR-0002）。本サーバはJSONファーストを正式サポートしています。
-- json_to_smf: JSONを検証しSMFへコンパイル・保存（bytes/trackCount/eventCount を返却）
+- json_to_smf: JSONを検証しSMFへコンパイキー説明:
+- `nativeLoadFailed`: ネイティブモジュール (node-midi) のロードに失敗した場合のエラーコード/文字列。
+- `nativeLoadErrorMessage`: ロード失敗時の詳細エラーメッセージ (最大400文字)。ABI不一致などの具体的原因を含む。
+- `nativePortCount`: node-midi が報告した総ポート数 (ロード成功時のみ)。
+- `realCount`: 実際に列挙して追加できたデバイス件数。
+- `placeholderInjected`: プレースホルダーを追加した場合 true。
+- `placeholderSuppressed`: フォールバック無効化 (MCP_MIDI_DEVICE_FALLBACK=0) で空配列を返した場合 true。ytes/trackCount/eventCount を返却）
 - smf_to_json: 既存SMFをJSONへデコンパイル（同メトリクス付き）
 
 関連ガイド: `docs/guide/composition_workflow.md` に、Score DSL/JSON MIDI を用いた「作曲→編集→再生→書き出し」までの実践フローをまとめています。
@@ -168,7 +174,8 @@ MCP_MIDI_EMIT_READY=1 MCP_MIDI_MANIFEST_THRESHOLD=50 vitest run tests/manifest_t
 - append_to_smf: 既存SMFへJSON/Score DSLチャンクを追記（末尾/指定tick）
 - insert_sustain: 既存SMFにサスティン（CC64）のON/OFFを指定tick範囲で挿入
 - insert_cc: 既存SMFに任意のCC番号のON/OFF相当（2値）を指定tick範囲で挿入
-- list_devices: MIDI出力デバイス列挙
+- list_devices: MIDI出力デバイス列挙（診断情報付き）
+- list_input_devices: MIDI入力デバイス列挙（診断情報付き）
 - playback_midi: 単音PoC再生（durationMsで長さ指定）
 - play_smf: SMFを解析して再生（dryRun解析、範囲再生、スケジューラ）
 - stop_playback: 再生停止（全ノート消音、タイマ解除、ポートクローズ）
@@ -504,6 +511,7 @@ macOS で CoreMIDI 出力ポートが 0 件の場合、環境変数 `MCP_MIDI_DE
    "diagnostics": {
       "platform": "darwin",
       "nativeLoadFailed": "ERR_DLOPEN_FAILED", // node-midi ロード失敗 (例)
+      "nativeLoadErrorMessage": "The module '.../midi.node' was compiled against NODE_MODULE_VERSION 127...", // 詳細エラーメッセージ (最大400文字)
       "realCount": 0,
       "placeholderInjected": true
    }
@@ -562,6 +570,38 @@ node /tmp/dump_list_devices.js   # realCount>0 / placeholder無しを期待
 | キャッシュ残存 | `npm cache verify` | 破損なら `npm cache clean --force` |
 
 CI / 非macOS 環境では CoreMIDI が無いので実デバイス 0 件は正常です。
+
+### list_input_devices の診断機能
+`list_input_devices` も同様に `diagnostics` フィールドを返します。ネイティブモジュールロード失敗時は空配列 + 診断情報のみを返します。
+
+```jsonc
+{
+   "ok": true,
+   "devices": [],
+   "diagnostics": {
+      "platform": "darwin",
+      "nativeLoadFailed": "ERR_DLOPEN_FAILED"
+   }
+}
+```
+
+正常時は実入力ポート一覧とポート数情報が返ります:
+
+```jsonc
+{
+   "ok": true,
+   "devices": [
+      { "index": 0, "name": "DX-7" },
+      { "index": 1, "name": "MIDI-TD17" },
+      { "index": 2, "name": "KeyLab 61 mk3 MIDI" }
+   ],
+   "diagnostics": {
+      "platform": "darwin",
+      "nativePortCount": 3,
+      "realCount": 3
+   }
+}
+```
 
 
 ## テストにおける利用例
