@@ -137,7 +137,7 @@ async function main() {
   { name: "append_to_smf", description: "既存SMFへJSON/Score DSLチャンクを追記（指定tick/末尾）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, json: { anyOf: [ { type: "object" }, { type: "string" } ] }, format: { type: "string", enum: ["json_midi_v1", "score_dsl_v1"] }, atTick: { type: "number" }, atEnd: { type: "boolean" }, gapTicks: { type: "number" }, trackIndex: { type: "number" }, preserveTrackStructure: { type: "boolean" }, trackMapping: { type: "array", items: { type: "number" } }, outputName: { type: "string" }, keepGlobalMeta: { type: "boolean", description: "追記チャンクに含まれる tempo/time/key メタを重複抑制せず保持 (既定:false)" }, allowKeyChange: { type: "boolean", description: "異なる keySignature を許可 (既定:false: 差異は無視)" } }, required: ["fileId", "json"] } },
   // keepGlobalMeta: 追記チャンク内の meta.(tempo|timeSignature|keySignature) をそのまま保持する（既定 false: 重複を自動的に抑制）
   // allowKeyChange: keySignature が異なる場合にエラーにせず保持（既定 false: 差異は警告し無視）
-  { name: "insert_sustain", description: "CC64(サスティン)のON/OFFを範囲に挿入", inputSchema: { type: "object", properties: { fileId: { type: "string" }, ranges: { type: "array", items: { type: "object", properties: { startTick: { type: "number" }, endTick: { type: "number" }, channel: { type: "number" }, trackIndex: { type: "number" }, valueOn: { type: "number" }, valueOff: { type: "number" } }, required: ["startTick", "endTick"] } } }, required: ["fileId", "ranges"] } },
+  { name: "insert_sustain", description: "CC64(サスティン)のON/OFFを範囲に挿入（必要に応じて既存のCC64を除去）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, ranges: { type: "array", items: { type: "object", properties: { startTick: { type: "number" }, endTick: { type: "number" }, channel: { type: "number" }, trackIndex: { type: "number" }, valueOn: { type: "number" }, valueOff: { type: "number" }, removeExisting: { type: "boolean", description: "この範囲の既存のCC64イベントを削除（既定:true）" } }, required: ["startTick", "endTick"] } } }, required: ["fileId", "ranges"] } },
   { name: "insert_cc", description: "任意のCC番号の値を範囲に挿入（ON/OFF相当の2値）", inputSchema: { type: "object", properties: { fileId: { type: "string" }, controller: { type: "number" }, ranges: { type: "array", items: { type: "object", properties: { startTick: { type: "number" }, endTick: { type: "number" }, channel: { type: "number" }, trackIndex: { type: "number" }, valueOn: { type: "number" }, valueOff: { type: "number" } }, required: ["startTick", "endTick"] } } }, required: ["fileId", "controller", "ranges"] } },
   { name: "extract_bars", description: "SMFファイルの指定小節範囲をJSON MIDI形式で抽出", inputSchema: { type: "object", properties: { fileId: { type: "string" }, startBar: { type: "number", minimum: 1 }, endBar: { type: "number", minimum: 1 }, format: { type: "string", enum: ["json_midi_v1", "score_dsl_v1"], default: "json_midi_v1" } }, required: ["fileId", "startBar", "endBar"] } },
   { name: "replace_bars", description: "SMFファイルの指定小節範囲をJSONデータで置換", inputSchema: { type: "object", properties: { fileId: { type: "string" }, startBar: { type: "number", minimum: 1 }, endBar: { type: "number", minimum: 1 }, json: {}, format: { type: "string", enum: ["json_midi_v1", "score_dsl_v1"], default: "json_midi_v1" }, outputName: { type: "string" } }, required: ["fileId", "startBar", "endBar", "json"] } },
@@ -1833,7 +1833,7 @@ async function main() {
     }
 
     // insert_sustain: 指定範囲に CC64 (Sustain) on/off を挿入
-    if (name === "insert_sustain") {
+  if (name === "insert_sustain") {
       const fileId: string | undefined = args?.fileId;
       const ranges: Array<{ startTick: number; endTick: number; channel?: number; trackIndex?: number; valueOn?: number; valueOff?: number }>|undefined = args?.ranges;
       if (!fileId) throw new Error("'fileId' is required for insert_sustain");
@@ -1869,6 +1869,7 @@ async function main() {
         const offRaw = rr.valueOff;
         const valueOn = Number.isFinite(Number(onRaw)) ? Math.max(0, Math.min(127, Number(onRaw))) : 127;
         const valueOff = Number.isFinite(Number(offRaw)) ? Math.max(0, Math.min(127, Number(offRaw))) : 0;
+        const removeExisting: boolean = rr.removeExisting !== false; // 既定 true
         // 挿入先
         const tIdx = Number.isFinite(Number(rr.trackIndex)) ? Math.max(0, Number(rr.trackIndex)) : pickTrackIndex();
         ensureTrack(tIdx);
@@ -1883,6 +1884,18 @@ async function main() {
         }
         if (!Number.isFinite(ch as number)) ch = 0;
         ch = Math.max(0, Math.min(15, ch as number));
+
+        // 範囲内の既存CC64を（同一チャンネルのみ）除去
+        if (removeExisting) {
+          json.tracks[tIdx].events = (json.tracks[tIdx].events||[]).filter((ev:any)=>{
+            if (ev?.type !== 'cc') return true;
+            if ((ev.controller|0) !== 64) return true;
+            const evCh = Number.isFinite(Number(ev.channel)) ? (ev.channel|0) : (Number.isFinite(Number(json.tracks[tIdx]?.channel)) ? (json.tracks[tIdx].channel|0) : 0);
+            if ((evCh|0) !== (ch|0)) return true;
+            const tk = ev.tick|0;
+            return !(tk >= start && tk <= end);
+          });
+        }
 
         json.tracks[tIdx].events.push({ type: 'cc', tick: start, controller: 64, value: valueOn, channel: ch });
         json.tracks[tIdx].events.push({ type: 'cc', tick: end, controller: 64, value: valueOff, channel: ch });
