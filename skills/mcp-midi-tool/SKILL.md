@@ -1,15 +1,18 @@
 ---
 name: mcp-midi-tool
-description: Use when the user wants to compose, inspect, edit, export, or dry-run analyze MIDI directly from this repository without using MCP. Covers JSON MIDI v1 and Score DSL v1 workflows, SMF round-trips, sustain or arbitrary CC insertion, manifest-backed file management, and direct helper scripts that call the local build artifacts instead of the MCP server.
+description: Use when the user wants to use the full MCP MIDI TOOL feature set from a portable skill folder. Includes direct helper scripts for common compose and inspect workflows, plus a bundled local tool wrapper that exposes the original MCP tools such as append_to_smf, extract_bars, replace_bars, playback, trigger_notes, device enumeration, and recording workflows from inside this skill package.
 ---
 
 # MCP MIDI TOOL
 
 This skill is for operating MIDI files directly from the bundled code in this skill folder.
 
-Do not use the MCP server for this skill unless the user explicitly asks for MCP integration work.
+Do not depend on an external MCP installation. This skill bundles what it needs locally.
 
-The bundled scripts call `lib/directApi.js` directly. There is no `initialize`, `tools/call`, or stdio JSON-RPC layer in this workflow.
+There are two execution paths:
+
+- `lib/directApi.js` for lightweight direct helpers
+- `lib/index.js` plus `lib/localToolClient.mjs` for the full original tool surface
 
 ## When To Use
 
@@ -31,14 +34,20 @@ Use the bundled scripts when you want deterministic direct execution from the re
 - `scripts/direct_compose_and_analyze.mjs`: compile a small Score DSL sample and report file metadata plus dry-run timing
 - `scripts/direct_inspect_and_fix_sustain.mjs`: inspect an SMF, infer note range and channel, insert CC64 if missing, export, then report dry-run timing
 - `scripts/direct_file_summary.mjs`: load an existing managed file and summarize tracks, events, and duration
+- `scripts/direct_compose_and_play.mjs`: compose a short tune and send it to a MIDI output port
+- `scripts/list_all_tools.mjs`: enumerate the full bundled tool surface
+- `scripts/run_tool.mjs`: invoke any original MCP tool by name using `TOOL_NAME` and `TOOL_ARGS_JSON`
 
-All scripts import `lib/directApi.js` directly.
+The direct scripts import `lib/directApi.js`. The generic tool scripts use `lib/localToolClient.mjs`, which talks to the bundled `lib/index.js` inside this skill folder.
 
 Environment variables:
 
 - `MCP_MIDI_MANIFEST`: optional manifest filename for the managed library state.
 - `FILE_ID`: target file for sustain diagnosis.
 - `MCP_MIDI_BASE_DIR`: optional base directory override for data resolution.
+- `TOOL_NAME`: tool name for `scripts/run_tool.mjs`
+- `TOOL_ARGS_JSON`: JSON string arguments for `scripts/run_tool.mjs`
+- `PORT_NAME`: output port hint for note or SMF playback scripts
 
 The default base directory is this skill folder. Managed files are stored under `data/midi`, exports under `data/export`, and the manifest under `data/manifest.json` unless overridden.
 
@@ -79,6 +88,19 @@ The default base directory is this skill folder. Managed files are stored under 
 - `insertControllerRanges`: insert another controller range directly into an existing file
 - `analyzeSmfDryRun`: estimate scheduled event count and duration without playback
 - `exportMidiFile`: copy a managed SMF into `data/export`
+- For everything else from the original MCP surface, use `scripts/run_tool.mjs`
+
+## Full Tool Coverage
+
+The bundled local tool wrapper exposes the original tool names from `src/index.ts`, including:
+
+- `store_midi`, `get_midi`, `list_midi`, `find_midi`, `export_midi`
+- `json_to_smf`, `smf_to_json`, `clean_midi`, `append_to_smf`
+- `insert_sustain`, `insert_cc`, `extract_bars`, `replace_bars`
+- `list_devices`, `list_input_devices`, `trigger_notes`, `playback_midi`
+- `play_smf`, `get_playback_status`, `stop_playback`
+- `start_single_capture`, `feed_single_capture`, `get_single_capture_status`
+- `start_continuous_recording`, `get_continuous_recording_status`, `stop_continuous_recording`, `list_continuous_recordings`
 
 ## Format Guidance
 
