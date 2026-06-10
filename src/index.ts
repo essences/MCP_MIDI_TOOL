@@ -1890,7 +1890,9 @@ async function main() {
           json.tracks[tIdx].events = (json.tracks[tIdx].events||[]).filter((ev:any)=>{
             if (ev?.type !== 'cc') return true;
             if ((ev.controller|0) !== 64) return true;
-            const evCh = Number.isFinite(Number(ev.channel)) ? (ev.channel|0) : (Number.isFinite(Number(json.tracks[tIdx]?.channel)) ? (json.tracks[tIdx].channel|0) : 0);
+            const trackChannel = json.tracks[tIdx]?.channel;
+            const normalizedTrackChannel = typeof trackChannel === 'number' ? (trackChannel|0) : 0;
+            const evCh = Number.isFinite(Number(ev.channel)) ? (ev.channel|0) : normalizedTrackChannel;
             if ((evCh|0) !== (ch|0)) return true;
             const tk = ev.tick|0;
             return !(tk >= start && tk <= end);

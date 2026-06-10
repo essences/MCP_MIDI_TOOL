@@ -1,0 +1,174 @@
+import { zSong } from "./jsonSchema.js";
+export async function decodeSmfToJson(buf) {
+    const mod = await import("@tonejs/midi");
+    const Midi = mod?.Midi || mod?.default?.Midi;
+    if (!Midi)
+        throw new Error("@tonejs/midi Midi class not found");
+    const midi = new Midi(Buffer.isBuffer(buf) ? buf : Buffer.from(buf));
+    const ppq = Number(midi.header?.ppq) || 480;
+    const format = 1;
+    // Build tempo events on track 0
+    const tempoEvents = (midi.header?.tempos || []).map((t) => ({
+        type: "meta.tempo",
+        tick: Number(t.ticks) || 0,
+        usPerQuarter: Math.max(1, Math.round(60000000 / (Number(t.bpm) || 120)))
+    }));
+    const tsEvents = (midi.header?.timeSignatures || []).map((ts) => {
+        const tick = Number(ts.ticks) || 0;
+        const arr = (ts.timeSignature || []);
+        const numerator = Number(arr?.[0]) || 4;
+        const denominator = Number(arr?.[1]) || 4;
+        return { type: "meta.timeSignature", tick, numerator, denominator };
+    });
+    // Key Signature events from header (fallback to per-track if header missing)
+    const KEY_TO_SF_MAJOR = {
+        "Cb": -7, "Gb": -6, "Db": -5, "Ab": -4, "Eb": -3, "Bb": -2, "F": -1,
+        "C": 0, "G": 1, "D": 2, "A": 3, "E": 4, "B": 5, "F#": 6, "C#": 7,
+    };
+    const KEY_TO_SF_MINOR = {
+        "Ab": -7, "Eb": -6, "Bb": -5, "F": -4, "C": -3, "G": -2, "D": -1,
+        "A": 0, "E": 1, "B": 2, "F#": 3, "C#": 4, "G#": 5, "D#": 6, "A#": 7,
+    };
+    function normKey(k) {
+        if (!k)
+            return undefined;
+        const s = String(k).trim();
+        // Normalize casing: first letter upper, rest as-is to preserve #/b
+        return s.length ? (s[0].toUpperCase() + s.slice(1)) : undefined;
+    }
+    const headerKS = (midi.header?.keySignatures || []).map((ks) => {
+        const tick = Number(ks.ticks) || 0;
+        const key = normKey(ks.key);
+        const scale = String(ks.scale || ks.mode || "major").toLowerCase();
+        const mi = scale === "minor" ? 1 : 0;
+        // Some implementations may provide sf directly
+        let sf = Number.isFinite(Number(ks.sf)) ? Number(ks.sf) : undefined;
+        if (!Number.isFinite(sf)) {
+            const map = mi ? KEY_TO_SF_MINOR : KEY_TO_SF_MAJOR;
+            sf = key && key in map ? map[key] : 0;
+        }
+        sf = Math.max(-7, Math.min(7, Math.round(sf)));
+        return { type: "meta.keySignature", tick, sf, mi };
+    });
+    // Fallback search on tracks if header empty
+    const trackKS = headerKS.length > 0 ? [] : [].concat(...midi.tracks.map((tr) => (tr.keySignatures || []).map((ks) => {
+        const tick = Number(ks.ticks) || 0;
+        const key = normKey(ks.key);
+        const scale = String(ks.scale || ks.mode || "major").toLowerCase();
+        const mi = scale === "minor" ? 1 : 0;
+        let sf = Number.isFinite(Number(ks.sf)) ? Number(ks.sf) : undefined;
+        if (!Number.isFinite(sf)) {
+            const map = mi ? KEY_TO_SF_MINOR : KEY_TO_SF_MAJOR;
+            sf = key && key in map ? map[key] : 0;
+        }
+        sf = Math.max(-7, Math.min(7, Math.round(sf)));
+        return { type: "meta.keySignature", tick, sf, mi };
+    })));
+    const ksEvents = headerKS.length > 0 ? headerKS : trackKS;
+    const tracks = midi.tracks.map((tr) => {
+        const name = tr.name || undefined;
+        const channel = Number.isFinite(Number(tr.channel)) ? Number(tr.channel) : undefined;
+        const events = [];
+        // Program change (put at tick 0 if known)
+        const prog = Number.isFinite(Number(tr.instrument?.number)) ? Number(tr.instrument.number) : undefined;
+        if (prog !== undefined) {
+            events.push({ type: "program", tick: 0, program: Math.max(0, Math.min(127, prog)), ...(channel !== undefined ? { channel } : {}) });
+        }
+        // Notes
+        function midiToName(m) {
+            const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+            const n = Math.max(0, Math.min(127, Math.round(m)));
+            const name = names[n % 12];
+            const oct = Math.floor(n / 12) - 1; // MIDI: C-1=0
+            return `${name}${oct}`;
+        }
+        for (const nt of (tr.notes || [])) {
+            const tick = Math.max(0, Math.round(Number(nt.ticks) || 0));
+            const duration = Math.max(1, Math.round(Number(nt.durationTicks) || 0));
+            const pitch = Math.max(0, Math.min(127, Math.round(Number(nt.midi))));
+            const velocity = Math.max(1, Math.min(127, Math.round(((Number(nt.velocity) || 0.7) * 127))));
+            const ev = { type: "note", tick, pitch, note: midiToName(pitch), velocity, duration };
+            if (channel !== undefined)
+                ev.channel = channel;
+            events.push(ev);
+        }
+        // Control Changes: controlChanges is a dict of controller -> event[]
+        const ccDict = tr.controlChanges || {};
+        for (const [numStr, arr] of Object.entries(ccDict)) {
+            const controller = Math.max(0, Math.min(127, Number(numStr) || 0));
+            for (const cc of arr) {
+                const tick = Math.max(0, Math.round(Number(cc.ticks) || 0));
+                let v = Number(cc.value);
+                if (!Number.isFinite(v))
+                    v = 0;
+                // Tone's CC value may be 0..1; scale to 0..127 if so
+                if (v >= 0 && v <= 1)
+                    v = Math.round(v * 127);
+                const value = Math.max(0, Math.min(127, Math.round(v)));
+                const ev = { type: "cc", tick, controller, value };
+                if (channel !== undefined)
+                    ev.channel = channel;
+                events.push(ev);
+            }
+        }
+        // Pitch Bend (if available)
+        for (const pb of (tr.pitchBends || [])) {
+            const tick = Math.max(0, Math.round(Number(pb.ticks) || 0));
+            const raw = Number(pb.value);
+            let value14;
+            if (Number.isFinite(raw)) {
+                // Tone.js の pitchBend は実装により以下2パターンが観測される想定:
+                //  (A) 0..16383 の 14bit 生値
+                //  (B) -1..+1 の正規化値（0 がセンター、+1 が最大正方向）
+                // 2048 (+1/4 range) が 0.25 などで与えられた場合、従来実装では round(0.25)=0 → -8192 へ潰れていた。
+                if (raw >= 0 && raw <= 16383 && Math.round(raw) === raw) {
+                    value14 = raw; // (A) 生値
+                }
+                else if (raw >= -1 && raw <= 1) {
+                    // (B) 正規化: -1 → 0, 0 → 8192, +1 → 16383 （線形）
+                    // 14bit は 0..16383 の 16384 離散値。端点含む線形マッピングで off-by-one を避けるため 16384 を乗算し 16383 に clamp。
+                    value14 = Math.round(((raw + 1) / 2) * 16384);
+                    if (value14 > 16383)
+                        value14 = 16383; // 上端補正
+                }
+                else {
+                    value14 = 8192; // 不明値はセンター
+                }
+            }
+            else {
+                value14 = 8192;
+            }
+            value14 = Math.max(0, Math.min(16383, value14));
+            const value = value14 - 8192; // -8192 .. +8191
+            const ev = { type: "pitchBend", tick, value };
+            if (channel !== undefined)
+                ev.channel = channel;
+            events.push(ev);
+        }
+        // Marker and others if available
+        for (const mk of (tr.markers || [])) {
+            const tick = Math.max(0, Math.round(Number(mk.ticks) || 0));
+            events.push({ type: "meta.marker", tick, text: String(mk.text || "").slice(0, 128) });
+        }
+        // Track name as meta
+        if (name) {
+            events.unshift({ type: "meta.trackName", tick: 0, text: String(name).slice(0, 128) });
+        }
+        // Sort events by tick
+        events.sort((a, b) => a.tick - b.tick);
+        return { name, channel, events };
+    });
+    // Prepend tempo/timeSignature/keySignature events into first track if exists; else create one
+    if (tempoEvents.length > 0 || tsEvents.length > 0 || ksEvents.length > 0) {
+        if (tracks.length === 0) {
+            tracks.push({ name: undefined, channel: undefined, events: [...tempoEvents, ...tsEvents, ...ksEvents] });
+        }
+        else {
+            tracks[0].events.unshift(...tempoEvents, ...tsEvents, ...ksEvents);
+            tracks[0].events.sort((a, b) => a.tick - b.tick);
+        }
+    }
+    const song = { format, ppq, tracks };
+    const parsed = zSong.parse(song);
+    return parsed;
+}
