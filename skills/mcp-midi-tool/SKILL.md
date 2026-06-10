@@ -40,7 +40,7 @@ Environment variables:
 - `FILE_ID`: target file for sustain diagnosis.
 - `MCP_MIDI_BASE_DIR`: optional base directory override for data resolution.
 
-The default base directory is this skill folder. Managed files are stored under `data/midi`, exports under `data/export`, and the manifest under `data/manifest.<pid>.json` unless overridden.
+The default base directory is this skill folder. Managed files are stored under `data/midi`, exports under `data/export`, and the manifest under `data/manifest.json` unless overridden.
 
 ## Operating Rules
 

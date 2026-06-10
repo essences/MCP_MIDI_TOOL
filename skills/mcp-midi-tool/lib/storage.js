@@ -21,7 +21,7 @@ export function resolveExportDir(baseDir = resolveBaseDir()) {
     return path.resolve(resolveDataDir(baseDir), "export");
 }
 export function resolveManifestPath(baseDir = resolveBaseDir()) {
-    const file = process.env.MCP_MIDI_MANIFEST || `manifest.${process.pid}.json`;
+    const file = process.env.MCP_MIDI_MANIFEST || "manifest.json";
     return path.resolve(resolveDataDir(baseDir), file);
 }
 export async function ensureDir(dir) {
