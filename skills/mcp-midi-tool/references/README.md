@@ -152,6 +152,10 @@ node scripts/run_tool.mjs
   - fileId の概要確認
 - `scripts/direct_inspect_and_fix_sustain.mjs`
   - サスティン補正
+- `scripts/test_continuous_recording.mjs`
+  - 単独の継続録音テスト
+- `scripts/play_and_record_together.mjs`
+  - 再生と録音を同時に走らせ、同期確認用の状態を出力
 
 ## 環境変数
 
@@ -183,6 +187,28 @@ node scripts/run_tool.mjs
 5. MIDI受け先を準備して `PORT_NAME=... node scripts/direct_compose_and_play.mjs`
 
 この順でやれば、依存関係、ツール面、生成、デバイス、再生まで段階的に確認できます。
+
+## 再生しながら録音
+
+同一の bundled server プロセス内で `play_smf` と `start_continuous_recording` を動かす専用スクリプトがあります。
+
+```bash
+PLAY_FILE_ID="<play-file-id>" \
+PLAY_PORT_NAME="IACドライバ バス1" \
+RECORD_PORT_NAME="KeyLab 61 mk3 MIDI" \
+node scripts/play_and_record_together.mjs
+```
+
+主な環境変数:
+
+- `PLAY_FILE_ID`
+- `PLAY_PORT_NAME`
+- `RECORD_PORT_NAME`
+- `OUTPUT_NAME`
+- `PRE_ROLL_MS`
+- `POST_ROLL_MS`
+
+このスクリプトは「同一プロセス内での開始協調」は行いますが、DAWのようなサンプル精度同期を保証するものではありません。
 
 ## トラブルシュート
 
