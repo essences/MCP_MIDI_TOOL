@@ -1,0 +1,137 @@
+{
+  "scope": "Migration implementation turn only; excludes earlier planning and later evaluation. Worker sessions include a final reporting response after the main completion, when present.",
+  "observed_setting": "Same gpt-6.1-sol model for all agents; orchestrator max and workers low.",
+  "duration_seconds": 1208.916,
+  "rates": {
+    "basis": "Illustrative Standard API token rates; not an invoice, subscription credit usage, or measured savings. Service tier and account billing are not established.",
+    "input_per_million_usd": 2,
+    "cached_input_per_million_usd": 0.1,
+    "output_per_million_usd": 10,
+    "cache_write_per_million_usd": 2.5,
+    "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
+  },
+  "agents": [
+    {
+      "role": "orchestrator",
+      "model": [
+        "gpt-6.1-sol"
+      ],
+      "reasoning_effort": [
+        "max"
+      ],
+      "started_at_utc": "2026-10-15T01:55:55.661Z",
+      "finished_at_utc": "2026-10-15T02:16:04.577Z",
+      "usage": {
+        "input_tokens": 18129320,
+        "cached_input_tokens": 17895552,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 35233,
+        "reasoning_output_tokens": 10681,
+        "total_tokens": 18164553
+      },
+      "uncached_input_tokens": 233768,
+      "max_request_input_tokens": 262399,
+      "standard_api_token_only_estimate_usd": 2.6094212
+    },
+    {
+      "role": "inventory",
+      "model": [
+        "gpt-6.1-sol"
+      ],
+      "reasoning_effort": [
+        "low"
+      ],
+      "started_at_utc": "2026-10-15T01:57:03.938Z",
+      "finished_at_utc": "2026-10-15T02:12:57.373Z",
+      "usage": {
+        "input_tokens": 6609900,
+        "cached_input_tokens": 6456192,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 37704,
+        "reasoning_output_tokens": 3831,
+        "total_tokens": 6647604
+      },
+      "uncached_input_tokens": 153708,
+      "max_request_input_tokens": 142551,
+      "standard_api_token_only_estimate_usd": 1.3300752
+    },
+    {
+      "role": "engine",
+      "model": [
+        "gpt-6.1-sol"
+      ],
+      "reasoning_effort": [
+        "low"
+      ],
+      "started_at_utc": "2026-10-15T01:57:15.829Z",
+      "finished_at_utc": "2026-10-15T02:15:49.669Z",
+      "usage": {
+        "input_tokens": 8771462,
+        "cached_input_tokens": 8629248,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 39131,
+        "reasoning_output_tokens": 7784,
+        "total_tokens": 8810593
+      },
+      "uncached_input_tokens": 142214,
+      "max_request_input_tokens": 153130,
+      "standard_api_token_only_estimate_usd": 1.5386628
+    },
+    {
+      "role": "storage",
+      "model": [
+        "gpt-6.1-sol"
+      ],
+      "reasoning_effort": [
+        "low"
+      ],
+      "started_at_utc": "2026-10-15T01:57:26.699Z",
+      "finished_at_utc": "2026-10-15T02:11:04.380Z",
+      "usage": {
+        "input_tokens": 3647751,
+        "cached_input_tokens": 3573248,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 31435,
+        "reasoning_output_tokens": 2578,
+        "total_tokens": 3679186
+      },
+      "uncached_input_tokens": 74503,
+      "max_request_input_tokens": 83840,
+      "standard_api_token_only_estimate_usd": 0.8206808
+    }
+  ],
+  "total_usage": {
+    "input_tokens": 37158433,
+    "cached_input_tokens": 36554240,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 143503,
+    "reasoning_output_tokens": 24874,
+    "total_tokens": 37301936
+  },
+  "token_only_price_parts_usd": {
+    "uncached_input_usd": 1.208386,
+    "cached_input_usd": 3.655424,
+    "output_including_reasoning_usd": 1.43503
+  },
+  "standard_api_token_only_total_usd": 6.29884,
+  "no_comparative_baseline": true,
+  "descriptive_reasoning_output_share": {
+    "orchestrator": 0.3031532937870746,
+    "inventory": 0.10160725652450668,
+    "engine": 0.1989215711328614,
+    "storage": 0.08201049785271194
+  },
+  "worker_session_overlap": {
+    "all_three_lifetimes_overlap_seconds": 817.681,
+    "lifetime_sum_seconds": 2884.956,
+    "includes_waiting": true,
+    "is_not_a_serial_execution_baseline": true
+  },
+  "orchestrator_collaboration_function_calls": {
+    "spawn_agent": 3,
+    "send_message": 32,
+    "list_agents": 2,
+    "followup_task": 12
+  },
+  "orchestrator_communication_counts_are_not_rework_counts": true
+}

@@ -1,0 +1,14 @@
+{
+  "name": "midi-tool-skill",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "midi": "^2.0.0",
+    "midi-file": "^1.2.4",
+    "zod": "^3.23.8"
+  }
+}

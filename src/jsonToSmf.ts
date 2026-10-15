@@ -54,19 +54,20 @@ function buildTrackChunk(events: EncEvent[]): Uint8Array {
 }
 
 export function encodeToSmfBinary(song: JsonMidiSong): Uint8Array {
-  const ppq = song.ppq || 480;
+  const ppq = song.ppq ?? 480;
+  if (song.format !== undefined && song.format !== 0 && song.format !== 1) throw new Error("Unsupported SMF format; expected 0 or 1");
+  if (!Number.isInteger(ppq) || ppq < 24 || ppq > 15360) throw new Error("Unsupported SMF PPQ; expected 24..15360");
   const format = (song.format === 0 ? 0 : 1) as 0 | 1;
 
   // 音名→MIDIノート番号（C4=60基準）
-  const NOTE_BASE: Record<string, number> = { C:0, "C#":1, Db:1, D:2, "D#":3, Eb:3, E:4, F:5, "F#":6, Gb:6, G:7, "G#":8, Ab:8, A:9, "A#":10, Bb:10, B:11 };
+  const NOTE_BASE: Record<string, number> = { C:0,D:2,E:4,F:5,G:7,A:9,B:11 };
   function nameToMidi(n?: string): number | undefined {
     if (!n) return undefined;
-    const m = /^([A-Ga-g])([#b]?)-?(\d+)$/.exec(n.trim());
+    const m = /^([A-Ga-g])([#b]?)(-?\d+)$/.exec(n.trim());
     if (!m) return undefined;
     let [_, L, acc, octStr] = m;
     const letter = L.toUpperCase();
-    const key = (letter + (acc || "")) as keyof typeof NOTE_BASE;
-    const base = NOTE_BASE[key];
+    const base = NOTE_BASE[letter] + (acc === '#' ? 1 : acc === 'b' ? -1 : 0);
     if (base === undefined) return undefined;
     const oct = Number(octStr);
     if (!Number.isFinite(oct)) return undefined;
@@ -81,14 +82,15 @@ export function encodeToSmfBinary(song: JsonMidiSong): Uint8Array {
     const enc: EncEvent[] = [];
 
     // track name meta at tick of the earliest event (default 0)
-    if (tr.name) {
+    if (tr.name && !tr.events.some(e => e.type === "meta.trackName")) {
       const nameBytes = textToBytes(String(tr.name).slice(0, 128));
       enc.push({ tick: 0, ord: 0, bytes: [0xff, 0x03, ...writeVarLen(nameBytes.length), ...nameBytes] });
     }
 
     for (const e of tr.events) {
       if (e.type === "meta.tempo") {
-        // collect later into track 0 (handled below)
+        const uspq = Math.max(1, e.usPerQuarter|0);
+        enc.push({tick:e.tick,ord:-10,bytes:[0xff,0x51,3,(uspq>>>16)&255,(uspq>>>8)&255,uspq&255]});
         continue;
       }
       if (e.type === "program") {
@@ -111,9 +113,17 @@ export function encodeToSmfBinary(song: JsonMidiSong): Uint8Array {
         enc.push({ tick: e.tick, ord: 30, bytes: [0xe0 | (ch & 0x0f), lsb, msb] });
         continue;
       }
+      if (e.type === "aftertouch.channel" || e.type === "aftertouch.poly") {
+        const ch = e.channel ?? chDefault ?? 0;
+        const pressure = Math.max(0,Math.min(127,e.pressure|0));
+        const bytes = e.type === "aftertouch.channel" ? [0xd0 | (ch & 15),pressure] : [0xa0 | (ch & 15),Math.max(0,Math.min(127,e.pitch|0)),pressure];
+        enc.push({tick:e.tick,ord:40,bytes});
+        continue;
+      }
       if (e.type === "note") {
         const ch = Number.isFinite(Number(e.channel)) ? (e.channel as number) : (chDefault ?? 0);
         const nRaw = (e as any).pitch ?? nameToMidi((e as any).note);
+        if (nRaw === undefined || !Number.isFinite(Number(nRaw))) throw new Error("Note requires a valid pitch or note name");
         const n = Math.max(0, Math.min(127, Number(nRaw)|0));
         const v = Math.max(1, Math.min(127, e.velocity|0));
         const tOn = e.tick|0;
@@ -134,11 +144,12 @@ export function encodeToSmfBinary(song: JsonMidiSong): Uint8Array {
         continue;
       }
       if (e.type === "meta.timeSignature") {
-        // handled later (first track)
+        const dd = Math.round(Math.log2(e.denominator));
+        enc.push({tick:e.tick,ord:-9,bytes:[0xff,0x58,4,e.numerator&255,dd,24,8]});
         continue;
       }
       if (e.type === "meta.keySignature") {
-        // handled later (first track)
+        enc.push({tick:e.tick,ord:-8,bytes:[0xff,0x59,2,e.sf&255,e.mi&255]});
         continue;
       }
       // unimplemented types are ignored for now (future work)
@@ -146,53 +157,15 @@ export function encodeToSmfBinary(song: JsonMidiSong): Uint8Array {
     return enc;
   };
 
-  // Gather global metas (tempo, timeSignature, keySignature) for track 0
-  const tempoEnc: EncEvent[] = [];
-  const tsEnc: EncEvent[] = [];
-  const ksEnc: EncEvent[] = [];
-  for (const tr of song.tracks) {
-    for (const e of tr.events) {
-      if (e.type === "meta.tempo") {
-        const uspq = Math.max(1, e.usPerQuarter|0);
-        const b2 = (uspq >>> 16) & 0xff, b1 = (uspq >>> 8) & 0xff, b0 = uspq & 0xff;
-        tempoEnc.push({ tick: e.tick, ord: -10, bytes: [0xff, 0x51, 0x03, b2, b1, b0] });
-      } else if (e.type === "meta.timeSignature") {
-        const num = Math.max(1, e.numerator|0);
-        const den = Math.max(1, e.denominator|0);
-        // convert to power-of-two exponent
-        const dd = Math.max(0, Math.round(Math.log2(den)));
-        const cc = 24; // MIDI clocks per metronome click
-        const bb = 8;  // 32nd notes per 24 MIDI clocks
-        tsEnc.push({ tick: e.tick, ord: -9, bytes: [0xff, 0x58, 0x04, num & 0xff, dd & 0xff, cc, bb] });
-      } else if (e.type === "meta.keySignature") {
-        const sf = (e.sf|0) & 0xff; // signed stored in byte
-        const mi = (e.mi|0) & 0xff;
-        ksEnc.push({ tick: e.tick, ord: -8, bytes: [0xff, 0x59, 0x02, sf, mi] });
-      }
-    }
-  }
-
-  let trackChunks: Uint8Array[] = [];
+  // Preserve metadata in each original track. Format 0 explicitly merges all tracks.
+  const trackChunks: Uint8Array[] = [];
   if (format === 0) {
-    // merge all tracks into single track (include tempo)
-    let merged: EncEvent[] = [];
-    merged.push(...tempoEnc);
-    for (let i = 0; i < song.tracks.length; i++) merged.push(...makeEncEventsForTrack(i));
+    const merged: EncEvent[] = [];
+    for (let i=0;i<song.tracks.length;i++) merged.push(...makeEncEventsForTrack(i));
     trackChunks.push(buildTrackChunk(merged));
   } else {
-    // format 1: first track gets global metas + its own events
-    for (let i = 0; i < song.tracks.length; i++) {
-      const own = makeEncEventsForTrack(i);
-      if (i === 0 && (tempoEnc.length > 0 || tsEnc.length > 0 || ksEnc.length > 0)) {
-        trackChunks.push(buildTrackChunk([...tempoEnc, ...tsEnc, ...ksEnc, ...own]));
-      } else {
-        trackChunks.push(buildTrackChunk(own));
-      }
-    }
-    if (song.tracks.length === 0) {
-      // empty safeguard track
-      trackChunks.push(buildTrackChunk([]));
-    }
+    for (let i=0;i<song.tracks.length;i++) trackChunks.push(buildTrackChunk(makeEncEventsForTrack(i)));
+    if (!trackChunks.length) trackChunks.push(buildTrackChunk([]));
   }
 
   const ntrks = trackChunks.length;
